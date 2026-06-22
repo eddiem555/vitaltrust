@@ -1,0 +1,29 @@
+services:
+  vitaltrust-app:
+    container_name: vitaltrust-app
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    restart: always
+    environment:
+      - NODE_ENV=production
+    networks:
+      - vitaltrust-net
+
+  nginx-proxy:
+    image: 'jc21/nginx-proxy-manager:latest'
+    container_name: nginx-proxy-manager
+    restart: always
+    ports:
+      - '80:80'
+      - '81:81'
+      - '443:443'
+    volumes:
+      - ./npm-data:/data
+      - ./npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - vitaltrust-net
+
+networks:
+  vitaltrust-net:
+    driver: bridge

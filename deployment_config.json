@@ -1,0 +1,7 @@
+{
+  "mode": "standalone",
+  "role": "standalone",
+  "appserver_url": "http://localhost:3000",
+  "dbserver_url": "http://localhost:3000",
+  "aibroker_url": "http://localhost:3000"
+}

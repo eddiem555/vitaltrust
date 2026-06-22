@@ -1,0 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-epic-blue: #005073; /* VitalTrust Deep Blue */
+  --color-epic-dark: #00172D;
+  --color-epic-light: #F2F7FA;
+  --color-cisco-blue: #00BCEB; /* Official Cisco Blue */
+}
+
+body {
+  @apply font-sans bg-[#f8fafc] text-slate-900;
+}
+
+.clinical-card {
+  @apply bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden;
+}
+
+.sidebar-link {
+  @apply flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all rounded-lg mx-2;
+}
+
+.sidebar-link-active {
+  @apply bg-blue-50 text-epic-blue;
+}
+
+.sidebar-link-inactive {
+  @apply text-slate-500 hover:bg-slate-50 hover:text-slate-900;
+}
+
+.badge-status {
+  @apply px-2 py-0.5 text-[10px] font-bold uppercase rounded-full border;
+}
+

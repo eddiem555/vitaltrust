@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.DS_Store
+*.log
+.env
+.env.local
+deployment/mcp_host/__pycache__
+deployment/npm-data
+deployment/npm-letsencrypt
+persistent_db.json

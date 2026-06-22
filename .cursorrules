@@ -1,0 +1,25 @@
+Project: Vital Trust EHR Security Lab
+Persona: Lead Security Architect
+Tech Stack: React (Vite), Express (Node), TypeScript, Tailwind CSS.
+
+Architecture Rules:
+1. This is a application used to demonstrate various security controls. It is not and will never be a real EHR (Electronic Healthcare Record) system.
+
+2. This application can run as a single 'standalone' system running on a single host, or, for sake of testing application security, this application can run in distributed mode where the application is deployed to 3 different servers that run the following application personas: . In distributed more, there are 3 different application personas: 
+  1) Application server (referred to in the code as appserver)  
+  2) Database server (referred to in the code as dbserver) 
+  3) AI Broker node (referred to in the coe as aibroker)
+
+3. In distributed mode the application server acts as the front end web interface for users and admins. It also acsts as a gateway proxying requests to 'dbserver' and 'aibroker'.
+
+4. The AI logic should always use Model Context Protocol (MCP) / Function Calling pattern to access private application data.
+
+5. Data is stored in 'persistent_db.json' (local file) and seeded from 'src/db.ts'.
+
+6. The application's primary purpose is to showcase security controls with products like Cisco Duo, Cisco Secure Access, Cisco AI Defense, and Cisco Secure Workload. The application itself should not enforce any security controls. It is okay to describe the security controls in the application, but the application, being a mock EHR, should not have any logic that enforces security controls within the application itself. 
+
+7. These are the existing Cisco Security hooks in Vital Trust application:
+  - Cisco Duo: SSO & Step-Up MFA integration.
+  - Cisco AI Defense: Outbound proxying via the 'Settings > Security Controls' tab settings.
+  - Cisco Secure Access: This is transparent to the Vital Trust application itself
+  - Cisco Secure Workload: This is transparent to the Vital Trust application itself
