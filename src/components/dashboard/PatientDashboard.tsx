@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FileText, Calendar, MessageSquare, CreditCard, ShieldCheck, Heart, Thermometer, Wind, X, Save, Clock, ChevronRight, CheckCircle2 } from 'lucide-react';
-import InstitutionalMesh from './InstitutionalMesh';
+import { FileText, Calendar, CreditCard, ShieldCheck, X, CheckCircle2 } from 'lucide-react';
+import MessagesPanel from './MessagesPanel';
+import AppointmentsPanel from './AppointmentsPanel';
 import VitalTrustAIChatbot from './VitalTrustAIChatbot';
 import AISettings from './AISettings';
 import AuditLogs from './AuditLogs';
-import { User, Appointment, Medication, BillingRecord, Patient } from '../../types';
+import { User, Medication, BillingRecord, Patient } from '../../types';
 import { api } from '../../services/api';
 
 export default function PatientDashboard({ tab, user }: { tab: string, user: User }) {
@@ -13,28 +14,20 @@ export default function PatientDashboard({ tab, user }: { tab: string, user: Use
   const [patientProfile, setPatientProfile] = useState<Patient | null>(null);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [billing, setBilling] = useState<BillingRecord[]>([]);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [messages, setMessages] = useState<any[]>([]);
   const [labResults, setLabResults] = useState<any[]>([]);
-  const [editingApt, setEditingApt] = useState<Appointment | null>(null);
-  const [aptToCancel, setAptToCancel] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [profile, meds, bills, apts, msgs, labs] = await Promise.all([
+        const [profile, meds, bills, labs] = await Promise.all([
           api.getPatient(user.id),
           api.getMedications(user.id),
           api.getBilling(user.id),
-          api.getAppointments({ patientId: user.id }),
-          api.getMessages(user.id),
           api.getLabResults(user.id)
         ]);
         setPatientProfile(profile);
         setMedications(meds);
         setBilling(bills);
-        setAppointments(apts);
-        setMessages(msgs);
         setLabResults(labs);
       } catch (err) {
         console.error("Failed to fetch clinical data", err);
@@ -43,31 +36,8 @@ export default function PatientDashboard({ tab, user }: { tab: string, user: Use
     fetchData();
   }, [user.id]);
 
-  const handleUpdateApt = async () => {
-    if (!editingApt) return;
-    try {
-      const updated = await api.updateAppointment(editingApt.id, {
-        date: editingApt.date,
-        time: editingApt.time
-      });
-      setAppointments(appointments.map(a => a.id === updated.id ? updated : a));
-      setEditingApt(null);
-    } catch (err) {
-      console.error("Failed to update appointment", err);
-    }
-  };
-
-  const handleDeleteApt = async (id: string) => {
-    try {
-      await api.deleteAppointment(id);
-      setAppointments(appointments.filter(a => a.id !== id));
-    } catch (err) {
-      console.error("Failed to cancel appointment", err);
-    }
-  };
-
   if (tab === 'messages') {
-    return <InstitutionalMesh />;
+    return <MessagesPanel user={user} />;
   }
 
   if (tab === 'ai_assistant') {
@@ -83,110 +53,7 @@ export default function PatientDashboard({ tab, user }: { tab: string, user: Use
   }
 
   if (tab === 'appointments') {
-      return (
-          <div className="space-y-6">
-              <h3 className="text-xl font-bold text-slate-800">My Appointments</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {appointments.map(apt => (
-                      <div key={apt.id} className="clinical-card p-6 border-l-4 border-l-epic-blue">
-                          <div className="flex justify-between items-start mb-4">
-                             <div className="p-2 bg-red-50 rounded-lg text-epic-blue">
-                                <Calendar size={20} />
-                             </div>
-                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${apt.status === 'confirmed' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
-                                {apt.status}
-                             </span>
-                          </div>
-                          <p className="font-bold text-slate-900">{apt.reason}</p>
-                          <p className="text-sm text-slate-500 mt-1">{apt.date} at {apt.time}</p>
-                          <div className="flex gap-4 mt-4">
-                            <button 
-                              onClick={() => setEditingApt(apt)}
-                              className="text-xs font-bold text-epic-blue hover:underline flex items-center gap-1"
-                            >
-                              Reschedule <ChevronRight size={14} />
-                            </button>
-                            <button 
-                              onClick={() => setAptToCancel(apt.id)}
-                              className="text-xs font-bold text-red-600 hover:underline flex items-center gap-1 cursor-pointer"
-                            >
-                              Cancel <X size={14} />
-                            </button>
-                          </div>
-                      </div>
-                  ))}
-              </div>
-
-              <AnimatePresence>
-                  {editingApt && (
-                      <Modal title="Reschedule Appointment" onClose={() => setEditingApt(null)}>
-                          <div className="space-y-4 p-6">
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">New Date</label>
-                                  <input 
-                                    type="date"
-                                    className="w-full border-b border-slate-200 py-2 outline-none focus:border-epic-blue text-sm font-bold"
-                                    value={editingApt.date}
-                                    onChange={(e) => setEditingApt({...editingApt, date: e.target.value})}
-                                  />
-                              </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">New Time</label>
-                                  <input 
-                                    type="text"
-                                    className="w-full border-b border-slate-200 py-2 outline-none focus:border-epic-blue text-sm font-bold"
-                                    value={editingApt.time}
-                                    onChange={(e) => setEditingApt({...editingApt, time: e.target.value})}
-                                    placeholder="e.g. 10:30 AM"
-                                  />
-                              </div>
-                              <button 
-                                onClick={handleUpdateApt}
-                                className="w-full py-3 bg-epic-blue text-white rounded-xl font-bold text-sm shadow-lg shadow-red-100 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2"
-                              >
-                                <Save size={18} /> SAVE
-                              </button>
-                          </div>
-                      </Modal>
-                  )}
-
-                  {aptToCancel && (
-                      <Modal title="Cancel Scheduled Appointment" onClose={() => setAptToCancel(null)}>
-                          <div className="p-8 space-y-6 text-center">
-                              <div className="mx-auto w-16 h-16 bg-red-50 rounded-full flex items-center justify-center text-red-600 border border-red-100">
-                                  <X size={28} />
-                              </div>
-                              <div className="space-y-2">
-                                  <h4 className="text-lg font-bold text-slate-900">Are you absolutely sure?</h4>
-                                  <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
-                                      This scheduled consultation will be immediately released from your electronic health record. This action cannot be reversed.
-                                  </p>
-                              </div>
-                              <div className="flex gap-3 justify-center pt-2">
-                                  <button 
-                                      type="button"
-                                      onClick={() => setAptToCancel(null)} 
-                                      className="px-5 py-2.5 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer animate-pulse-slow"
-                                  >
-                                      No, Keep It
-                                  </button>
-                                  <button 
-                                      type="button"
-                                      onClick={async () => {
-                                          await handleDeleteApt(aptToCancel);
-                                          setAptToCancel(null);
-                                      }} 
-                                      className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg shadow-red-500/20 transition-all cursor-pointer"
-                                  >
-                                      Yes, Cancel Appointment
-                                  </button>
-                              </div>
-                          </div>
-                      </Modal>
-                  )}
-              </AnimatePresence>
-          </div>
-      )
+    return <AppointmentsPanel user={user} />;
   }
 
   return (
@@ -214,7 +81,6 @@ export default function PatientDashboard({ tab, user }: { tab: string, user: Use
                {[
                  { id: 'records', label: 'Lab Results', desc: labResults.length > 0 ? `View ${labResults.length} test results` : 'No results found', icon: <FileText className="text-red-600" />, iconBg: 'bg-red-50' },
                  { id: 'medications', label: 'Medications', desc: `${medications.length} active prescriptions`, icon: <Calendar className="text-indigo-600" />, iconBg: 'bg-indigo-50' },
-                 { id: 'messages', label: 'Messages', desc: messages.length > 0 ? `${messages.length} secure messages` : 'No messages', icon: <MessageSquare className="text-emerald-600" />, iconBg: 'bg-emerald-50' },
                  { id: 'billing', label: 'Billing', desc: `Balance: $${billing.reduce((acc, b) => b.status !== 'paid' ? acc + b.amount : acc, 0).toFixed(2)}`, icon: <CreditCard className="text-amber-600" />, iconBg: 'bg-amber-50' },
                ].map((card) => (
                  <div 
@@ -298,32 +164,6 @@ export default function PatientDashboard({ tab, user }: { tab: string, user: Use
               </Modal>
           )}
 
-          {activeView === 'messages' && (
-              <Modal title="Messages" onClose={() => setActiveView(null)}>
-                  <div className="p-6 space-y-4 max-h-[400px] overflow-y-auto">
-                      {messages.length > 0 ? messages.map(msg => (
-                          <div key={msg.id} className={`p-4 rounded-xl border ${msg.senderId === user.id ? 'bg-red-50 border-red-100 ml-8' : 'bg-slate-50 border-slate-100 mr-8'}`}>
-                              <div className="flex justify-between items-center mb-1">
-                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{msg.senderId}</p>
-                                  <p className="text-[10px] text-slate-400">{new Date(msg.timestamp).toLocaleDateString()}</p>
-                              </div>
-                              <p className="text-sm font-medium text-slate-800 leading-relaxed">{msg.content}</p>
-                          </div>
-                      )) : (
-                          <div className="py-12 text-center flex flex-col items-center gap-4">
-                             <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-300">
-                                <MessageSquare size={32} />
-                             </div>
-                             <div className="space-y-1">
-                                <p className="text-base font-bold text-slate-800">No Messages</p>
-                                <p className="text-xs text-slate-500 font-medium italic">Contact your care team via clinical messaging</p>
-                             </div>
-                          </div>
-                      )}
-                  </div>
-              </Modal>
-          )}
-
           {activeView === 'billing' && (
               <Modal title="Billing History" onClose={() => setActiveView(null)}>
                   <div className="p-6 space-y-4">
@@ -345,40 +185,6 @@ export default function PatientDashboard({ tab, user }: { tab: string, user: Use
               </Modal>
           )}
 
-          {aptToCancel && (
-              <Modal title="Cancel Scheduled Appointment" onClose={() => setAptToCancel(null)}>
-                  <div className="p-8 space-y-6 text-center">
-                      <div className="mx-auto w-16 h-16 bg-red-50 rounded-full flex items-center justify-center text-red-600 border border-red-100">
-                          <X size={28} />
-                      </div>
-                      <div className="space-y-2">
-                          <h4 className="text-lg font-bold text-slate-900">Are you absolutely sure?</h4>
-                          <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
-                              This scheduled consultation will be immediately released from your electronic health record. This action cannot be reversed.
-                          </p>
-                      </div>
-                      <div className="flex gap-3 justify-center pt-2">
-                          <button 
-                              type="button"
-                              onClick={() => setAptToCancel(null)} 
-                              className="px-5 py-2.5 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer animate-pulse-slow"
-                          >
-                              No, Keep It
-                          </button>
-                          <button 
-                              type="button"
-                              onClick={async () => {
-                                  await handleDeleteApt(aptToCancel);
-                                  setAptToCancel(null);
-                              }} 
-                              className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg shadow-red-500/20 transition-all cursor-pointer"
-                          >
-                              Yes, Cancel Appointment
-                          </button>
-                      </div>
-                  </div>
-              </Modal>
-          )}
       </AnimatePresence>
     </div>
   );

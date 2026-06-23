@@ -130,13 +130,22 @@ export const api = {
     return handleResponse(res);
   },
 
-  async getAppointments(params: { patientId?: string, doctorId?: string }): Promise<any[]> {
-    const query = new URLSearchParams(params as any).toString();
+  async getAppointments(params: { patientId?: string; doctorId?: string; nurseId?: string; requesterId?: string; requesterRole?: string }): Promise<Appointment[]> {
+    const query = new URLSearchParams(params as Record<string, string>).toString();
     const res = await fetch(`/api/dbserver/appointments?${query}`);
     return handleResponse(res);
   },
 
-  async updateAppointment(id: string, data: { date?: string, time?: string, status?: string }) {
+  async createAppointment(data: Partial<Appointment> & { requesterId?: string; requesterRole?: string }) {
+    const res = await fetch(`/api/dbserver/appointments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  async updateAppointment(id: string, data: Partial<Appointment> & { requesterId?: string; requesterRole?: string }) {
     const res = await fetch(`/api/dbserver/appointments/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -145,8 +154,11 @@ export const api = {
     return handleResponse(res);
   },
 
-  async deleteAppointment(id: string) {
-    const res = await fetch(`/api/dbserver/appointments/${id}`, {
+  async deleteAppointment(id: string, requesterId?: string, requesterRole?: string) {
+    const query = new URLSearchParams();
+    if (requesterId) query.set('requesterId', requesterId);
+    if (requesterRole) query.set('requesterRole', requesterRole);
+    const res = await fetch(`/api/dbserver/appointments/${id}?${query.toString()}`, {
       method: "DELETE",
     });
     return handleResponse(res);
@@ -216,6 +228,39 @@ export const api = {
 
   async getMessages(userId: string): Promise<any[]> {
     const res = await fetch(`/api/dbserver/messages?userId=${userId}`);
+    return handleResponse(res);
+  },
+
+  async sendMessage(data: { senderId: string; receiverId: string; content: string }) {
+    const res = await fetch(`/api/dbserver/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  async deleteMessages(ids: string[], userId: string) {
+    const res = await fetch(`/api/dbserver/messages`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, userId }),
+    });
+    return handleResponse(res);
+  },
+
+  async getMessageDirectory(): Promise<Pick<User, 'id' | 'role' | 'realName'>[]> {
+    const res = await fetch(`/api/dbserver/users/directory`);
+    return handleResponse(res);
+  },
+
+  async getDoctors(): Promise<{ id: string; name: string }[]> {
+    const res = await fetch(`/api/dbserver/doctors`);
+    return handleResponse(res);
+  },
+
+  async getNurses(): Promise<{ id: string; name: string }[]> {
+    const res = await fetch(`/api/dbserver/nurses`);
     return handleResponse(res);
   },
   

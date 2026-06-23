@@ -18,39 +18,34 @@ function getModelFamily(model: string): 'openai' | 'groq' | 'gemini' | 'bedrock'
 }
 
 const getInitialMessage = (u: User) => {
-  if (u.role === 'admin') {
-    return `Hello Administrator ${u.realName}! I am your secure Enterprise AI Assistant & Security Copilot, utilizing MCP Tool Integration.
-
-I can help you audit security logs, monitor OIDC users, check Cisco network posture, review system status, manage configurations, and query all clinical records (patients, appointments, care-team assignments, medications). Ask me questions like:
-* "Query the audit logs for recent high-risk SSO logins"
-* "List the active directory of registered portal users"
-* "How many appointments do nurses have in August?"
-* "Show doctor-to-patient care team assignments"`;
-  }
-  if (u.role === 'doctor') {
-    return `Hello Dr. ${u.realName}! I am your Clinical Physician Assistant, powered by MCP Tool Integration.
-
-I can assist you with active clinical rounds, checking patient vitals, clinical research, diagnostic details, and prescribing treatments. Ask me questions like:
-* "Search clinical medical guides about hypertension medication regimens"
-* "Perform a clinical deep dive on patient profile patient1"
+  const clinicalExamples: Record<string, string> = {
+    admin: `* "Query the audit logs for recent high-risk SSO logins"
+* "List the active Vital Trust users"
+* "How many appointments do we have in August?"`,
+    doctor: `* "Perform a clinical deep dive on patient profile patient1"
 * "Prescribe lisinopril 10mg once daily to patient patient1"
-* "Provide a summary of my current assigned patient roster"`;
-  }
-  if (u.role === 'nurse') {
-    return `Hello Nurse ${u.realName}! I am your Nursing Ward Copilot, powered by MCP Tool Integration.
-
-I can assist you with nursing rounds, bedroom administration tasks, record vitals, and coordinate ward progress. Ask me questions like:
-* "Give me a roster of patients on my ward"
+* "Provide a summary of my current assigned patient roster"`,
+    nurse: `* "Give me a roster of patients on my ward"
 * "Record new vital signs for patient patient1: HR: 78, Temp: 98.4, BP: 120/80"
-* "Show the bedside medication schedules for patient patient1"
-* "Set medication status for task med_patient1_0 to 'administered'"`;
-  }
-  return `Hello ${u.realName}! I am your secure Virtual Health Assistant, powered by MCP Tool Integration.
-
-I can assist you with details regarding your wellness care plans, medication logs, and clinical encounters. Feel free to ask me questions like:
-* "What medications are in my current health regime?"
+* "Show the bedside medication schedules for patient patient1"`,
+    patient: `* "What medications are in my current health regime?"
 * "Do I have any upcoming appointments scheduled?"
-* "What were my last checked lab results and vitals?"`;
+* "What were my last checked lab results and vitals?"`
+  };
+  const examples = clinicalExamples[u.role] || clinicalExamples.patient;
+  const roleLabel =
+    u.role === 'admin' ? 'Administrator' :
+    u.role === 'doctor' ? `Dr. ${u.realName}` :
+    u.role === 'nurse' ? `Nurse ${u.realName}` :
+    u.realName;
+
+  return `Hello ${roleLabel}! I am your Vital Trust Virtual Health Assistant with MCP Tool Integration.
+
+I can help with Vital Trust data via secure MCP tools and general inquires.
+
+Examples:
+${examples}
+* "Tell me how AI works in a few of paragraphs."`;
 };
 
 export default function VitalTrustAIChatbot({ user }: { user: User; key?: string }) {
@@ -274,7 +269,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
             Virtual Health Assistant
           </h3>
           <p className="text-xs text-slate-500 font-medium mt-1">
-            Secure, direct clinical intelligence regarding your personal medical records and wellness plans.
+            General AI assistance plus secure MCP access to Vital Trust clinical and operational data.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -462,7 +457,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={`Ask VitalTrust virtual assistant...`}
+                placeholder={`Ask Vital Trust virtual assistant...`}
                 className="w-full pl-6 pr-16 py-4 bg-white border border-slate-200 focus:border-[#7c1a1a] focus:shadow-md focus:shadow-red-50/50 rounded-2xl outline-none transition-all placeholder:text-slate-400 font-medium text-sm text-slate-800"
               />
               <button

@@ -6,6 +6,8 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 import { Issuer, generators } from "openid-client";
 import cookieParser from "cookie-parser";
 import { db_mock, DEFAULT_PASSWORD, INITIAL_DB } from "./src/db";
+import { canSendMessage } from "./src/messaging-rules";
+import { careTeamForPatientIndex } from "./src/appointments";
 import { VERSION, VERSION_DATE } from "./src/version";
 import fs from "fs";
 import * as dotenv from "dotenv";
@@ -201,6 +203,23 @@ async function startServer() {
         patient.clinical_notes = `Patient is currently being monitored for ${patient.condition || 'routine checkup'}. The recorded treatment plan consists of physical observation and active prescription management: ${patient.medications?.join(', ') || 'none'}. Responding well to therapy. High-value clinical monitoring target.`;
       }
     });
+
+    if (db_mock.appointments) {
+      db_mock.appointments.forEach((apt: any) => {
+        if (!apt.nurseId && apt.patientId) {
+          const patient = db_mock.patients.find((p: any) => p.id === apt.patientId);
+          if (patient?.assignedNurseId) apt.nurseId = patient.assignedNurseId;
+          else {
+            const num = parseInt(String(apt.patientId).replace('patient', ''), 10);
+            if (Number.isFinite(num)) apt.nurseId = careTeamForPatientIndex(num).nurseId;
+          }
+        }
+        if (!apt.doctorId && apt.patientId) {
+          const patient = db_mock.patients.find((p: any) => p.id === apt.patientId);
+          if (patient?.assignedDoctorId) apt.doctorId = patient.assignedDoctorId;
+        }
+      });
+    }
 
     db_mock.users.forEach((user: any, index: number) => {
       if (user.role === 'admin') {
@@ -1377,6 +1396,7 @@ async function startServer() {
                   id: `apt_${u.id}_${j}`,
                   patientId: u.id,
                   doctorId: randomDoctorId,
+                  nurseId: randomNurseId,
                   date: `2026-09-${12 + j * 6}`,
                   time: `${9 + j * 2}:30 AM`,
                   reason: ["Routine Posture Analysis", "Metabolic Profiling Review", "Cardiopulmonary EKG Follow-up"][j % 3],
@@ -1499,7 +1519,7 @@ async function startServer() {
             <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background: #00172D; color: white;">
               <div style="text-align: center;">
                 <h2 style="color: #00BCEB;">Authentication Successful</h2>
-                <p>Syncing VitalTrust session...</p>
+                <p>Syncing Vital Trust session...</p>
                 <script>
                   if (window.opener) {
                     window.opener.postMessage({ 
@@ -1790,23 +1810,33 @@ async function startServer() {
     dbRouter.get("/doctors", (req, res) => res.json(db_mock.doctors));
     dbRouter.get("/nurses", (req, res) => res.json(db_mock.nurses));
     dbRouter.get("/appointments", (req, res) => {
-      const { patientId, doctorId } = req.query;
+      const { patientId, doctorId, nurseId, requesterId, requesterRole } = req.query as Record<string, string | undefined>;
       let results = db_mock.appointments;
-      if (patientId) {
+      if (requesterRole === "patient" && requesterId) {
+        results = results.filter((a: any) => a.patientId === requesterId);
+      } else if (patientId) {
         results = results.filter((a: any) => a.patientId === patientId);
       }
       if (doctorId) {
         results = results.filter((a: any) => a.doctorId === doctorId);
       }
+      if (nurseId) {
+        results = results.filter((a: any) => a.nurseId === nurseId);
+      }
       res.json(results);
     });
     dbRouter.post("/appointments", (req, res) => {
-      const { patientId, date, time, reason, status } = req.body;
+      const { patientId, doctorId, nurseId, date, time, reason, status, requesterId, requesterRole } = req.body;
+      const resolvedPatientId = patientId || (requesterRole === "patient" ? requesterId : "unknown_patient");
+      const patientNum = parseInt(String(resolvedPatientId).replace("patient", ""), 10);
+      const careTeam = Number.isFinite(patientNum) ? careTeamForPatientIndex(patientNum) : { doctorId: doctorId || "doctor1", nurseId: nurseId || "nurse1" };
       const newApt = {
         id: `apt${Date.now()}`,
-        patientId: patientId || "unknown_patient",
+        patientId: resolvedPatientId,
+        doctorId: doctorId || careTeam.doctorId,
+        nurseId: nurseId || careTeam.nurseId,
         date: date || new Date().toISOString().split('T')[0],
-        time: time || "09:00",
+        time: time || "09:00 AM",
         reason: reason || "Routine checkup",
         status: status || "pending"
       };
@@ -1816,23 +1846,50 @@ async function startServer() {
       res.status(201).json(newApt);
     });
     dbRouter.put("/appointments/:id", (req, res) => {
-      const { date, time, reason, status } = req.body;
+      const { date, time, reason, status, doctorId, nurseId, requesterId, requesterRole } = req.body;
       const aptIdx = db_mock.appointments.findIndex((a: any) => a.id === req.params.id);
-      if (aptIdx !== -1) {
-        db_mock.appointments[aptIdx] = { ...db_mock.appointments[aptIdx], date, time, reason, status };
-        savePersistedDb();
-        createLog("system", "Data Service", "system", "Appointment Update", "Success", `Appointment ${req.params.id} updated. New Status: ${status}`, req);
-        res.json(db_mock.appointments[aptIdx]);
-      } else res.status(404).json({ error: "Appointment not found" });
+      if (aptIdx === -1) return res.status(404).json({ error: "Appointment not found" });
+      const existing = db_mock.appointments[aptIdx];
+      if (requesterRole === "patient" && requesterId && existing.patientId !== requesterId) {
+        return res.status(403).json({ error: "Patients may only modify their own appointments" });
+      }
+      if (requesterRole === "doctor" && requesterId && existing.doctorId !== requesterId) {
+        return res.status(403).json({ error: "Doctors may only modify appointments they are assigned to" });
+      }
+      if (requesterRole === "nurse" && requesterId && existing.nurseId !== requesterId) {
+        return res.status(403).json({ error: "Nurses may only modify appointments they are assigned to" });
+      }
+      db_mock.appointments[aptIdx] = {
+        ...existing,
+        ...(date !== undefined && { date }),
+        ...(time !== undefined && { time }),
+        ...(reason !== undefined && { reason }),
+        ...(status !== undefined && { status }),
+        ...(doctorId !== undefined && { doctorId }),
+        ...(nurseId !== undefined && { nurseId }),
+      };
+      savePersistedDb();
+      createLog("system", "Data Service", "system", "Appointment Update", "Success", `Appointment ${req.params.id} updated. New Status: ${status}`, req);
+      res.json(db_mock.appointments[aptIdx]);
     });
     dbRouter.delete("/appointments/:id", (req, res) => {
+      const { requesterId, requesterRole } = req.query as Record<string, string | undefined>;
       const aptIdx = db_mock.appointments.findIndex((a: any) => a.id === req.params.id);
-      if (aptIdx !== -1) {
-        db_mock.appointments.splice(aptIdx, 1);
-        savePersistedDb();
-        createLog("system", "Data Service", "system", "Appointment Cancellation", "Warning", `Appointment ${req.params.id} purged from records.`, req);
-        res.status(204).send();
-      } else res.status(404).json({ error: "Appointment not found" });
+      if (aptIdx === -1) return res.status(404).json({ error: "Appointment not found" });
+      const existing = db_mock.appointments[aptIdx];
+      if (requesterRole === "patient" && requesterId && existing.patientId !== requesterId) {
+        return res.status(403).json({ error: "Patients may only delete their own appointments" });
+      }
+      if (requesterRole === "doctor" && requesterId && existing.doctorId !== requesterId) {
+        return res.status(403).json({ error: "Doctors may only delete appointments they are assigned to" });
+      }
+      if (requesterRole === "nurse" && requesterId && existing.nurseId !== requesterId) {
+        return res.status(403).json({ error: "Nurses may only delete appointments they are assigned to" });
+      }
+      db_mock.appointments.splice(aptIdx, 1);
+      savePersistedDb();
+      createLog("system", "Data Service", "system", "Appointment Cancellation", "Warning", `Appointment ${req.params.id} purged from records.`, req);
+      res.status(204).send();
     });
     dbRouter.get("/billing", (req, res) => {
       const { patientId } = req.query;
@@ -1927,6 +1984,14 @@ async function startServer() {
       if (!senderId || !receiverId || !content) {
         return res.status(400).json({ error: "senderId, receiverId, and content are required" });
       }
+      const sender = db_mock.users.find((u: any) => u.id === senderId);
+      const receiver = db_mock.users.find((u: any) => u.id === receiverId);
+      if (!sender || !receiver) {
+        return res.status(400).json({ error: "Invalid sender or receiver" });
+      }
+      if (!canSendMessage(sender.role, receiver.role)) {
+        return res.status(403).json({ error: "Messaging policy violation: patient-to-patient messaging is not permitted" });
+      }
       const newMsg = {
         id: `msg${Date.now()}`,
         senderId,
@@ -1938,6 +2003,27 @@ async function startServer() {
       savePersistedDb();
       createLog(senderId, "Messaging Service", "user", "Secure Message Sent", "Success", `Message sent to ${receiverId}`, req);
       res.status(201).json({ success: true, message: newMsg });
+    });
+    dbRouter.delete("/messages", (req, res) => {
+      const { ids, userId } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0 || !userId) {
+        return res.status(400).json({ error: "ids (array) and userId are required" });
+      }
+      const idSet = new Set(ids);
+      const before = db_mock.messages.length;
+      db_mock.messages = db_mock.messages.filter(
+        (m: any) => !(idSet.has(m.id) && (m.senderId === userId || m.receiverId === userId))
+      );
+      const removed = before - db_mock.messages.length;
+      if (removed === 0) {
+        return res.status(404).json({ error: "No matching messages found for deletion" });
+      }
+      savePersistedDb();
+      createLog(userId, "Messaging Service", "user", "Secure Messages Deleted", "Warning", `Deleted ${removed} message(s)`, req);
+      res.json({ success: true, deleted: removed });
+    });
+    dbRouter.get("/users/directory", (_req, res) => {
+      res.json(db_mock.users.map((u: any) => ({ id: u.id, role: u.role, realName: u.realName })));
     });
 
     // Admin Specific Data Routes
@@ -3092,43 +3178,44 @@ async function startServer() {
         }
       };
 
-      let roleSpecificInstructions = "";
-      if (uRole === "admin") {
-        roleSpecificInstructions = `You are the VitalTrust AI Administrator Assistant with full enterprise visibility.
-You manage user directory records (create, update, delete), query audit logs, adjust system integration configuration, and have complete read/write access to all clinical records via MCP tools — the same backend APIs used by doctors and nurses.
-Use get_all_appointments for schedule questions (returns all appointments with care-team assignments). Use get_ward_roster for patient-to-doctor/nurse mappings. Use get_clinicians for staff directory lookups.`;
-      } else if (uRole === "doctor") {
-        roleSpecificInstructions = `You are Dr. ${uName}'s Clinical Physician Assistant, connected via MCP tools that call the same REST APIs as the web portal.
-You can view your appointment queue, open patient charts, prescribe or discontinue medications, record vitals, and update patient status.`;
-      } else if (uRole === "nurse") {
-        roleSpecificInstructions = `You are Nurse ${uName}'s Clinical Bedside Assistant, connected via MCP tools that call the same REST APIs as the web portal.
-You can view the ward roster, administer medications (MAR), record vitals, and update patient status.`;
-      } else {
-        roleSpecificInstructions = `You are the VitalTrust Patient Assistant, connected via MCP tools that call the same REST APIs as the web portal.
-You can view your health record, billing, messages, and appointments, and reschedule or cancel your own visits.`;
-      }
+      const mcpCapabilitiesByRole: Record<string, string> = {
+        admin: `Your MCP tools include full enterprise access: user directory, audit logs, system configuration, care-team assignment, and all clinical records (patients, appointments, medications, vitals). Prefer get_all_appointments for schedule reporting, get_ward_roster for patient-to-clinician mappings, and get_clinicians for staff lookups.`,
+        doctor: `Your MCP tools support clinical workflows: ward roster, assigned patient charts (get_assigned_patient_deep_dive), your appointment queue (get_all_appointments), vitals, prescribing, and patient status updates.`,
+        nurse: `Your MCP tools support bedside workflows: ward roster, patient vitals, medication administration tasks (MAR), and patient status updates.`,
+        patient: `Your MCP tools expose your own health record: profile, medications, appointments, lab results, billing, and messages. Appointment cancel/reschedule applies only to your visits.`
+      };
+      const roleMcpGuidance = mcpCapabilitiesByRole[uRole] || mcpCapabilitiesByRole.patient;
 
-      const systemPrompt = `${roleSpecificInstructions}
-Your active session context:
+      const systemPrompt = `You are the Vital Trust Virtual Health Assistant for ${uName}.
+
+General assistance:
+- Answer any user question naturally, including casual conversation, creative writing, and general knowledge. Vital Trust does not restrict prompts by login role.
+
+Private Vital Trust data (MCP — required for EHR data):
+- When the user asks about VitalT rust patients, schedules, medications, vitals, billing, audit logs, users, or system configuration, you MUST call the appropriate MCP tools to read or mutate that data. Never invent, guess, or paste private clinical/PHI data from memory.
+- Each MCP tool calls the same authenticated REST APIs used by the web portal. Tool authorization is enforced server-side per role.
+
+${roleMcpGuidance}
+
+Session context:
 - Logged-in User ID: "${uId}"
 - Logged-in Real Name: "${uName}"
 - Logged-in Role: "${uRole}"
 
-Guidelines for resolving self-references:
-1. If the logged-in user is a Nurse (role: "nurse"), filter get_ward_roster results to patients where "assignedNurseId" equals "${uId}" when the user asks about "my patients" or "my ward".
-2. If the logged-in user is a Doctor (role: "doctor"), filter get_ward_roster results to patients where "assignedDoctorId" equals "${uId}" when the user asks about "my patients". Use get_all_appointments (which returns your queue) for schedule questions.
-3. If the logged-in user is a Patient (role: "patient"), use patient-specific tools — your ID is "${uId}".
-4. If the logged-in user is an Administrator (role: "admin"), do not filter clinical data to a single user unless explicitly asked. You have system-wide visibility.
+MCP tool scoping for self-references (when using tools, not for refusing other questions):
+1. Nurse (role: "nurse"): when the user asks about "my patients" or "my ward", filter get_ward_roster results to patients where assignedNurseId equals "${uId}".
+2. Doctor (role: "doctor"): when the user asks about "my patients", filter get_ward_roster to assignedDoctorId equals "${uId}". Use get_all_appointments for their schedule queue.
+3. Patient (role: "patient"): use patient-specific tools with user ID "${uId}" for their own record.
+4. Administrator (role: "admin"): do not filter clinical data to a single user unless explicitly asked — system-wide visibility.
 
-Guidelines for clinical appointments:
-- Doctors view their queue with get_all_appointments (filtered to their doctorId automatically).
-- Administrators view all appointments with get_all_appointments; each record includes assignedNurseId and assignedDoctorId for care-team reporting.
-- Patients may view, reschedule, or cancel only their own appointments (cancel_appointment, reschedule_appointment).
-- Nurses do not manage appointments in this portal; administrators can correlate nurse schedules by joining get_all_appointments with assignedNurseId.
+Appointment MCP notes:
+- Doctors: get_all_appointments returns their queue (filtered by doctorId).
+- Administrators: get_all_appointments returns all appointments with care-team assignments.
+- Patients: view/reschedule/cancel only their own appointments.
+- Nurses: correlate schedules via get_ward_roster patient assignments; appointment management is not a nurse MCP action in this portal.
 
-Rely strictly on MCP tools for data access and mutations — every tool calls the same backend APIs used by the web UI. Do not invent clinical data.
-If asked about configuration status, declare that you correspond to configuration setting: ${targetModelName}.
-Answer in a supportive, objective, clear healthcare-professional tone. Use markdown bullet lists.`;
+If asked which model you use, say you correspond to configuration: ${targetModelName}.
+Be helpful, clear, and use markdown bullet lists when presenting structured data.`;
 
       const activeTools: string[] = ROLE_TOOLS[uRole] || [];
 
@@ -3594,7 +3681,7 @@ Answer in a supportive, objective, clear healthcare-professional tone. Use markd
             } else {
               visitText = "No future or current visits scheduled.";
             }
-            simBedrockResponse = `Hello ${uName},\n\nThis is a secure response generated via **AWS Bedrock (${activeModelName})**.\n\nHere are your upcoming scheduled clinical visits:\n\n${visitText}\n\nAll visit queries to the VitalTrust portal are fully protected by Cisco Secure Access ZTNA policies. Please reach out if you have any questions!`;
+            simBedrockResponse = `Hello ${uName},\n\nThis is a secure response generated via **AWS Bedrock (${activeModelName})**.\n\nHere are your upcoming scheduled clinical visits:\n\n${visitText}\n\nAll visit queries to the VitalT rust portal are fully protected by Cisco Secure Access ZTNA policies. Please reach out if you have any questions!`;
           } else {
             simBedrockResponse = `Hello ${uName}! I am your secure virtual assistant powered by **AWS Bedrock (${activeModelName})** with full IAM validation.\n\nI am connected with your personal care records in real-time. Feel free to ask me questions like:\n\n* 💊 **My medications**\n* 🫀 **My vital signs**\n* 📅 **My appointments**\n\nAll traffic is fully microsegmented and auditable. How can I help you today?`;
           }

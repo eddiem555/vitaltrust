@@ -22,7 +22,8 @@ import {
   RotateCcw,
   Lock,
   Settings,
-  BookOpen
+  BookOpen,
+  MessageSquare
 } from 'lucide-react';
 import { User } from './types';
 import { api } from './services/api';
@@ -185,6 +186,7 @@ export default function App() {
             <>
               <NavItem active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<Activity size={20} />} label="Topology" />
               <NavItem active={activeTab === 'management'} onClick={() => setActiveTab('management')} icon={<UserCircle size={20} />} label="User Management" />
+              <NavItem active={activeTab === 'messages'} onClick={() => setActiveTab('messages')} icon={<MessageSquare size={20} />} label="Messages" />
               <NavItem active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={<ClipboardList size={20} />} label="Audit Logs" />
               <NavItem active={activeTab === 'ai_assistant'} onClick={() => setActiveTab('ai_assistant')} icon={<BrainCircuit size={20} />} label="AI Assistant" />
               <NavItem active={activeTab === 'docs'} onClick={() => setActiveTab('docs')} icon={<BookOpen size={20} />} label="Documentation" />
@@ -194,6 +196,7 @@ export default function App() {
             <>
               <NavItem active={activeTab === 'summary'} onClick={() => setActiveTab('summary')} icon={<Activity size={20} />} label="My Care Plan" />
               <NavItem active={activeTab === 'appointments'} onClick={() => setActiveTab('appointments')} icon={<Calendar size={20} />} label="Appointments" />
+              <NavItem active={activeTab === 'messages'} onClick={() => setActiveTab('messages')} icon={<MessageSquare size={20} />} label="Messages" />
               <NavItem active={activeTab === 'ai_assistant'} onClick={() => setActiveTab('ai_assistant')} icon={<BrainCircuit size={20} />} label="AI Assistant" />
               <NavItem active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={<ClipboardList size={20} />} label="Audit Logs" />
               <NavItem active={activeTab === 'docs'} onClick={() => setActiveTab('docs')} icon={<BookOpen size={20} />} label="Documentation" />
@@ -203,6 +206,8 @@ export default function App() {
             <>
               <NavItem active={activeTab === 'summary'} onClick={() => setActiveTab('summary')} icon={<Activity size={20} />} label="Clinical Summary" />
               <NavItem active={activeTab === 'patients'} onClick={() => setActiveTab('patients')} icon={<Users size={20} />} label="Patient Lists" />
+              <NavItem active={activeTab === 'appointments'} onClick={() => setActiveTab('appointments')} icon={<Calendar size={20} />} label="Appointments" />
+              <NavItem active={activeTab === 'messages'} onClick={() => setActiveTab('messages')} icon={<MessageSquare size={20} />} label="Messages" />
               <NavItem active={activeTab === 'ai_assistant'} onClick={() => setActiveTab('ai_assistant')} icon={<BrainCircuit size={20} />} label="AI Assistant" />
               <NavItem active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={<ClipboardList size={20} />} label="Audit Logs" />
               <NavItem active={activeTab === 'docs'} onClick={() => setActiveTab('docs')} icon={<BookOpen size={20} />} label="Documentation" />

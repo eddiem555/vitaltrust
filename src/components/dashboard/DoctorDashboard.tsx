@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Users, Activity, FileText, Calendar, Plus, Search, ChevronRight, Stethoscope, Thermometer, Heart, Wind, X, Save, Pill, UserCircle } from 'lucide-react';
 import Patients from './Patients';
-import InstitutionalMesh from './InstitutionalMesh';
+import MessagesPanel from './MessagesPanel';
+import AppointmentsPanel from './AppointmentsPanel';
 import AuditLogs from './AuditLogs';
 import AISettings from './AISettings';
 import VitalTrustAIChatbot from './VitalTrustAIChatbot';
@@ -62,7 +63,11 @@ export default function DoctorDashboard({ tab, user }: { tab: string, user: User
   }
 
   if (tab === 'messages') {
-    return <InstitutionalMesh />;
+    return <MessagesPanel user={user} />;
+  }
+
+  if (tab === 'appointments') {
+    return <AppointmentsPanel user={user} />;
   }
 
   if (tab === 'ai_assistant') {

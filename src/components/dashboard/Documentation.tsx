@@ -485,9 +485,9 @@ export default function Documentation({ user }: DocumentationProps) {
             <Shield size={12} className="text-cisco-blue" />
             Security & Integration Specs
           </div>
-          <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight">VitalTrust System Documentation</h2>
+          <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight">Vital Trust System Documentation</h2>
           <p className="text-white/80 text-sm md:text-base leading-relaxed">
-            Welcome to the VitalTrust Reference and Compliance center. Explore the official Model Context Protocol (MCP) server endpoints, security-hardened topologies, integrated security controls, and full attack-defense mitigation definitions.
+            Welcome to the Vital Trust Reference and Compliance center. Explore the official Model Context Protocol (MCP) server endpoints, security-hardened topologies, integrated security controls, and full attack-defense mitigation definitions.
           </p>
         </div>
       </div>
@@ -717,7 +717,7 @@ export default function Documentation({ user }: DocumentationProps) {
                   Triple-Server Isolation Architecture (Node Topology)
                 </h3>
                 <p className="text-slate-500 text-xs mt-1">
-                  VitalTrust simulates an industrial segmented multi-cloud health record mesh split into three individual isolated microservices with Zero-Trust network boundaries:
+                  Vital Trust simulates an industrial segmented multi-cloud health record mesh split into three individual isolated microservices with Zero-Trust network boundaries:
                 </p>
               </div>
 
@@ -856,7 +856,7 @@ export default function Documentation({ user }: DocumentationProps) {
                   </div>
                 </div>
                 <p className="text-slate-600 text-xs leading-relaxed col-span-2">
-                  When a clinician requests highly restricted Patient Health Information (PHI) like deep clinical diagnoses, SSNs, or insurance IDs, VitalTrust intercepts the token and requests a **Cisco Duo Step-Up MFA Challenge** verification prompt.
+                  When a clinician requests highly restricted Patient Health Information (PHI) like deep clinical diagnoses, SSNs, or insurance IDs, Vital Trust intercepts the token and requests a **Cisco Duo Step-Up MFA Challenge** verification prompt.
                 </p>
                 <div className="text-xs space-y-2 font-semibold">
                   <span className="text-emerald-700 block">* Federated login integrated via OAuth 2.0 / OpenID Connect.</span>
@@ -938,7 +938,7 @@ export default function Documentation({ user }: DocumentationProps) {
                   Attack vs. Cisco Secure Defense Mitigation Matrix
                 </h3>
                 <p className="text-slate-500 text-xs mt-1">
-                  How the VitalTrust application handles potential threats, malicious vectors, and logical leaks across clinical workflows:
+                  How the Vital Trust application handles potential threats, malicious vectors, and logical leaks across clinical workflows:
                 </p>
               </div>
 

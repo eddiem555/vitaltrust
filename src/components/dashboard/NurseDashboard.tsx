@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Activity, Pill, ClipboardList, Clock, Search, ChevronRight, AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react';
 import Patients from './Patients';
-import InstitutionalMesh from './InstitutionalMesh';
+import MessagesPanel from './MessagesPanel';
+import AppointmentsPanel from './AppointmentsPanel';
 import AuditLogs from './AuditLogs';
 import AISettings from './AISettings';
 import VitalTrustAIChatbot from './VitalTrustAIChatbot';
@@ -52,7 +53,11 @@ export default function NurseDashboard({ tab, user }: { tab: string, user: User 
   }
 
   if (tab === 'messages') {
-    return <InstitutionalMesh />;
+    return <MessagesPanel user={user} />;
+  }
+
+  if (tab === 'appointments') {
+    return <AppointmentsPanel user={user} />;
   }
 
   if (tab === 'ai_assistant') {

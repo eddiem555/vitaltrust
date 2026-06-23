@@ -4,6 +4,7 @@ import AuditLogs from './AuditLogs';
 import UserManagement from '../admin/UserManagement';
 import AISettings from './AISettings';
 import VitalTrustAIChatbot from './VitalTrustAIChatbot';
+import MessagesPanel from './MessagesPanel';
 import { User } from '../../types';
 
 interface AdminDashboardProps {
@@ -17,6 +18,8 @@ export default function AdminDashboard({ tab, user }: AdminDashboardProps) {
       return <InfraTopology user={user} />;
     case 'management':
       return <UserManagement />;
+    case 'messages':
+      return <MessagesPanel user={user} />;
     case 'ai_assistant':
       return <VitalTrustAIChatbot key={user.id} user={user} />;
     case 'logs':
