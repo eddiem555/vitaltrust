@@ -60,15 +60,17 @@ export default function InfraTopology({ user }: { user: User }) {
             </p>
           </div>
 
-          <button
-            onClick={fetchTopology}
-            disabled={scanning}
-            type="button"
-            className="flex items-center gap-2.5 px-5 py-2.5 bg-red-950/40 text-red-400 hover:text-white border border-red-900/60 hover:bg-red-900/80 disabled:opacity-50 text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg cursor-pointer"
-          >
-            <RefreshCw size={14} className={scanning ? 'animate-spin' : ''} />
-            {scanning ? 'SCANNING SYSTEM...' : 'TEST DEPLOYMENT CONNECTIVITY'}
-          </button>
+          {mode === 'distributed' && (
+            <button
+              onClick={fetchTopology}
+              disabled={scanning}
+              type="button"
+              className="flex items-center gap-2.5 px-5 py-2.5 bg-red-950/40 text-red-400 hover:text-white border border-red-900/60 hover:bg-red-900/80 disabled:opacity-50 text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg cursor-pointer"
+            >
+              <RefreshCw size={14} className={scanning ? 'animate-spin' : ''} />
+              {scanning ? 'SCANNING SYSTEM...' : 'TEST DEPLOYMENT CONNECTIVITY'}
+            </button>
+          )}
         </div>
 
         {errorMessage && (

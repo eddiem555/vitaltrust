@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "3.0.337",
+  "version": "3.0.348",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -12,7 +12,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-crypto/sha256-js": "^5.2.0",
     "@google/genai": "^1.29.0",
+    "@smithy/protocol-http": "^5.1.0",
+    "@smithy/signature-v4": "^5.0.2",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "cookie-parser": "^1.4.7",

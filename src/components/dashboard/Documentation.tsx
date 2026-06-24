@@ -211,7 +211,7 @@ export default function Documentation({ user }: DocumentationProps) {
         oldPassword: { type: "string", description: "Current password.", required: true },
         newPassword: { type: "string", description: "New password.", required: true }
       },
-      samplePayload: { oldPassword: "L@bt3sting", newPassword: "SecurePass2026!" },
+      samplePayload: { oldPassword: "<current-password>", newPassword: "SecurePass2026!" },
       securityImpact: "Credential change via auth API; audited."
     },
     {

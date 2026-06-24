@@ -3,8 +3,7 @@ import { INITIAL_APPOINTMENTS } from './appointments';
 import { INITIAL_MESSAGES } from './messages';
 import { INITIAL_BILLING } from './billing';
 import { careTeamForPatientIndex } from './appointments';
-
-export const DEFAULT_PASSWORD = 'L@bt3sting';
+import { getDefaultPasswordSha256 } from './password-auth';
 
 const STABLE_CONDITIONS = [
   'Hypertension', 'Diabetes', 'Recovery', 'Allergies', 'Asthma',
@@ -130,14 +129,14 @@ const PATIENT_ROSTER: Array<{
   }),
 ];
 
-function buildUsers() {
-  const admins = ADMIN_USERS.map((a) => ({ ...a, role: 'admin' as const, password: DEFAULT_PASSWORD }));
-  const doctors = DOCTOR_USERS.map((d) => ({ ...d, role: 'doctor' as const, password: DEFAULT_PASSWORD }));
-  const nurses = NURSE_USERS.map((n) => ({ ...n, role: 'nurse' as const, password: DEFAULT_PASSWORD }));
+function buildUsers(defaultPasswordHash: string) {
+  const admins = ADMIN_USERS.map((a) => ({ ...a, role: 'admin' as const, password: defaultPasswordHash }));
+  const doctors = DOCTOR_USERS.map((d) => ({ ...d, role: 'doctor' as const, password: defaultPasswordHash }));
+  const nurses = NURSE_USERS.map((n) => ({ ...n, role: 'nurse' as const, password: defaultPasswordHash }));
   const patients = PATIENT_ROSTER.map((p, i) => ({
     id: `patient${i + 1}`,
     role: 'patient' as const,
-    password: DEFAULT_PASSWORD,
+    password: defaultPasswordHash,
     realName: p.name,
     email: p.email,
     phone: p.phone,
@@ -215,93 +214,99 @@ function buildMedicationsDetailed() {
   return meds;
 }
 
-export const INITIAL_DB = {
-  users: buildUsers(),
-  patients: buildPatients(),
-  nurses: buildNurses(),
-  doctors: buildDoctors(),
-  appointments: INITIAL_APPOINTMENTS,
-  lab_results: buildLabResults(),
-  billing: INITIAL_BILLING,
-  medications_detailed: buildMedicationsDetailed(),
-  messages: INITIAL_MESSAGES,
-  logs: [
-    {
-      id: 'log_init',
-      timestamp: new Date().toISOString(),
-      userId: 'system',
-      userName: 'System',
-      role: 'system',
-      activity: 'Database Initialized',
-      status: 'Success',
-      details: 'VitalTrust distributed healthcare portal backend initialized successfully.',
-      nodeRole: 'standalone',
-    },
-  ],
-};
-
-// ─── Post-init enrichment (PII, vitals, role metadata) ──────────────────────
-
-INITIAL_DB.users.forEach((user: any, index: number) => {
-  user.phone = formatTenDigitPhone(user.phone || '', index);
-});
-
-INITIAL_DB.patients.forEach((patient: any, index: number) => {
-  const patientNum = index + 1;
-  patient.condition = conditionForIndex(patientNum);
-  patient.medications = getMedsForCondition(patient.condition);
-  patient.vitals = {
-    hr: (68 + (patientNum % 15)).toString(),
-    temp: (97.7 + (patientNum % 12) * 0.1).toFixed(1),
-    bp: `${115 + (patientNum % 13)}/${74 + (patientNum % 9)}`,
-    lastUpdated: '2026-05-28',
+export function createInitialDb(defaultPasswordHash: string) {
+  const db = {
+    users: buildUsers(defaultPasswordHash),
+    patients: buildPatients(),
+    nurses: buildNurses(),
+    doctors: buildDoctors(),
+    appointments: INITIAL_APPOINTMENTS,
+    lab_results: buildLabResults(),
+    billing: INITIAL_BILLING,
+    medications_detailed: buildMedicationsDetailed(),
+    messages: INITIAL_MESSAGES,
+    logs: [
+      {
+        id: 'log_init',
+        timestamp: new Date().toISOString(),
+        userId: 'system',
+        userName: 'System',
+        role: 'system',
+        activity: 'Database Initialized',
+        status: 'Success',
+        details: 'VitalTrust distributed healthcare portal backend initialized successfully.',
+        nodeRole: 'standalone',
+      },
+    ],
   };
-  const { doctorId, nurseId } = careTeamForPatientIndex(patientNum);
-  patient.assignedDoctorId = doctorId;
-  patient.assignedNurseId = nurseId;
 
-  const matchUser = INITIAL_DB.users.find((u: any) => u.id === patient.id);
-  patient.phone = matchUser ? matchUser.phone : formatTenDigitPhone(patient.phone || '', index + 100);
+  db.users.forEach((user: any, index: number) => {
+    user.phone = formatTenDigitPhone(user.phone || '', index);
+  });
 
-  if (!patient.ssn) patient.ssn = `999-55-${1000 + patientNum}`;
-  if (!patient.insurance_id) {
-    const providers = ['BCBS', 'AET', 'CIG', 'UNI', 'HUM'];
-    patient.insurance_id = `${providers[index % providers.length]}-${3211000 + patientNum * 77}`;
-  }
-  patient.clinical_notes = `Patient is currently being monitored for ${patient.condition}. The recorded treatment plan consists of physical observation and active prescription management: ${patient.medications.join(', ')}. Responding well to therapy. High-value clinical monitoring target.`;
-});
+  db.patients.forEach((patient: any, index: number) => {
+    const patientNum = index + 1;
+    patient.condition = conditionForIndex(patientNum);
+    patient.medications = getMedsForCondition(patient.condition);
+    patient.vitals = {
+      hr: (68 + (patientNum % 15)).toString(),
+      temp: (97.7 + (patientNum % 12) * 0.1).toFixed(1),
+      bp: `${115 + (patientNum % 13)}/${74 + (patientNum % 9)}`,
+      lastUpdated: '2026-05-28',
+    };
+    const { doctorId, nurseId } = careTeamForPatientIndex(patientNum);
+    patient.assignedDoctorId = doctorId;
+    patient.assignedNurseId = nurseId;
 
-INITIAL_DB.users.forEach((user: any, index: number) => {
-  if (user.role === 'admin') {
-    if (user.clearance_level === undefined) user.clearance_level = (index % 3) + 1;
-    if (!user.internal_notes) {
-      user.internal_notes = `Superuser level ${user.clearance_level} access. Handles operational compliance and role mappings for duo-oidc federation. Fully authorized administrative profile for ${user.realName}.`;
+    const matchUser = db.users.find((u: any) => u.id === patient.id);
+    patient.phone = matchUser ? matchUser.phone : formatTenDigitPhone(patient.phone || '', index + 100);
+
+    if (!patient.ssn) patient.ssn = `999-55-${1000 + patientNum}`;
+    if (!patient.insurance_id) {
+      const providers = ['BCBS', 'AET', 'CIG', 'UNI', 'HUM'];
+      patient.insurance_id = `${providers[index % providers.length]}-${3211000 + patientNum * 77}`;
     }
-  } else if (user.role === 'doctor') {
-    if (!user.npi_number) user.npi_number = `${1689701000 + index * 123}`;
-    if (!user.internal_notes) {
-      user.internal_notes = `Credentialed specialist doctor. Professional licensing active, NPI directory checked. Chief attending notes verified for ${user.realName}. Registered location: ${user.address}.`;
+    patient.clinical_notes = `Patient is currently being monitored for ${patient.condition}. The recorded treatment plan consists of physical observation and active prescription management: ${patient.medications.join(', ')}. Responding well to therapy. High-value clinical monitoring target.`;
+  });
+
+  db.users.forEach((user: any, index: number) => {
+    if (user.role === 'admin') {
+      if (user.clearance_level === undefined) user.clearance_level = (index % 3) + 1;
+      if (!user.internal_notes) {
+        user.internal_notes = `Superuser level ${user.clearance_level} access. Handles operational compliance and role mappings for duo-oidc federation. Fully authorized administrative profile for ${user.realName}.`;
+      }
+    } else if (user.role === 'doctor') {
+      if (!user.npi_number) user.npi_number = `${1689701000 + index * 123}`;
+      if (!user.internal_notes) {
+        user.internal_notes = `Credentialed specialist doctor. Professional licensing active, NPI directory checked. Chief attending notes verified for ${user.realName}. Registered location: ${user.address}.`;
+      }
+    } else if (user.role === 'nurse') {
+      if (!user.assigned_ward) {
+        const wards = ['Emergency Room', 'Mental Health Residence - Ward B', 'Cardiac ICU', 'Surgical Ward', 'Pediatric Wing'];
+        user.assigned_ward = wards[index % wards.length];
+      }
+      if (!user.internal_notes) {
+        user.internal_notes = `Licensed practicing Nurse. Clinical scheduling active. Assigned to the high-acuity ${user.assigned_ward}. Primary focus area: emergency patient care support.`;
+      }
+    } else if (user.role === 'patient') {
+      const pRecord = db.patients.find((p: any) => p.id === user.id);
+      if (pRecord) {
+        user.ssn = pRecord.ssn;
+        user.insurance_id = pRecord.insurance_id;
+        user.clinical_notes = pRecord.clinical_notes;
+      } else {
+        user.ssn = `999-55-220${index}`;
+        user.insurance_id = `BCBS-1100${index}`;
+        user.clinical_notes = 'Routine clinical assessment. Stable diagnostic values.';
+      }
     }
-  } else if (user.role === 'nurse') {
-    if (!user.assigned_ward) {
-      const wards = ['Emergency Room', 'Mental Health Residence - Ward B', 'Cardiac ICU', 'Surgical Ward', 'Pediatric Wing'];
-      user.assigned_ward = wards[index % wards.length];
-    }
-    if (!user.internal_notes) {
-      user.internal_notes = `Licensed practicing Nurse. Clinical scheduling active. Assigned to the high-acuity ${user.assigned_ward}. Primary focus area: emergency patient care support.`;
-    }
-  } else if (user.role === 'patient') {
-    const pRecord = INITIAL_DB.patients.find((p: any) => p.id === user.id);
-    if (pRecord) {
-      user.ssn = pRecord.ssn;
-      user.insurance_id = pRecord.insurance_id;
-      user.clinical_notes = pRecord.clinical_notes;
-    } else {
-      user.ssn = `999-55-220${index}`;
-      user.insurance_id = `BCBS-1100${index}`;
-      user.clinical_notes = 'Routine clinical assessment. Stable diagnostic values.';
-    }
-  }
-});
+  });
+
+  return db;
+}
+
+const seedPasswordHash = getDefaultPasswordSha256() || '';
+
+export const INITIAL_DB = createInitialDb(seedPasswordHash);
 
 export const db_mock = JSON.parse(JSON.stringify(INITIAL_DB));

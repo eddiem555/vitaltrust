@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Send, Bot, Database, Sparkles, User as UserIcon, Lock, Key, Settings, AlertTriangle, RotateCcw } from 'lucide-react';
+import { migrateEolBedrockModelId, stripBedrockUiPrefix } from '../../bedrock-models';
 import { User } from '../../types';
 
 interface Message {
@@ -87,7 +88,16 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
 
   // Load initially on mount — sync boot id so redeploys clear stale browser chat history
   useEffect(() => {
-    setSelectedModel(localStorage.getItem('vt_ai_selected_model') || 'OpenAI GPT-5');
+    const storedModel = localStorage.getItem('vt_ai_selected_model') || 'OpenAI GPT-5';
+    if (storedModel.toLowerCase().includes('bedrock')) {
+      const migrated = `Bedrock - ${migrateEolBedrockModelId(stripBedrockUiPrefix(storedModel))}`;
+      setSelectedModel(migrated);
+      if (migrated !== storedModel) {
+        localStorage.setItem('vt_ai_selected_model', migrated);
+      }
+    } else {
+      setSelectedModel(storedModel);
+    }
     setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
     setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
     setGeminiKey(localStorage.getItem('vt_ai_gemini_key') || '');

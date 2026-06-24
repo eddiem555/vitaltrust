@@ -1,3 +1,4 @@
+import "./load-env.js";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -5,23 +6,22 @@ import { fileURLToPath } from "url";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import { Issuer, generators } from "openid-client";
 import cookieParser from "cookie-parser";
-import { db_mock, DEFAULT_PASSWORD, INITIAL_DB } from "./src/db";
+import { db_mock, createInitialDb } from "./src/db";
 import { canSendMessage } from "./src/messaging-rules";
 import { careTeamForPatientIndex } from "./src/appointments";
 import { VERSION, VERSION_DATE } from "./src/version";
+import {
+  hashPassword,
+  verifyPassword,
+  getDefaultPasswordSha256,
+  isDefaultPasswordConfigured,
+  isSha256PasswordHash,
+} from "./src/password-auth";
 import fs from "fs";
 import crypto from "crypto";
-import * as dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { ROLE_TOOLS, runMcpTool } from "./server-mcp-tools";
-
-// Load environment variables immediately from possible current or root path
-const envPath = path.join(process.cwd(), ".env");
-if (fs.existsSync(envPath)) {
-  dotenv.config({ path: envPath });
-} else {
-  dotenv.config();
-}
+import { executeBedrockChat } from "./server-bedrock";
 
 // ==========================================
 // SYSTEM CONSOLE LOGGING INTERCEPTOR
@@ -1558,7 +1558,17 @@ async function startServer() {
     app.post("/api/auth/callback", handleCallback);
     app.get("/auth/callback", (req, res) => res.redirect("/api/auth/callback"));
 
+    app.get("/api/auth/config", (req, res) => {
+      res.json({ defaultPasswordConfigured: isDefaultPasswordConfigured() });
+    });
+
     app.post("/api/auth/login", (req, res) => {
+      if (!isDefaultPasswordConfigured()) {
+        return res.status(503).json({
+          error: "Default password not configured. Set DEFAULT_PASSWORD_SHA256 in .env and restart the server.",
+        });
+      }
+
       const { username, email, password } = req.body;
       const loginId = (username || email || "").toString().trim();
       
@@ -1583,7 +1593,11 @@ async function startServer() {
         });
       }
 
-      if (user.password === password) {
+      if (verifyPassword(password, user.password)) {
+        if (!isSha256PasswordHash(user.password)) {
+          user.password = hashPassword(password);
+          savePersistedDb();
+        }
         console.log(`[Auth] Manual login successful for: ${user.id} (${user.role})`);
         createLog(user.id, user.realName, user.role, "Manual Login Success", "Success", "User authenticated via local directory.", req);
         const { password: _, ...userSafe } = user;
@@ -1649,8 +1663,12 @@ async function startServer() {
       const { userId, oldPassword, newPassword } = req.body;
       const user = db_mock.users.find((u: any) => u.id === userId);
       if (!user) return res.status(404).json({ error: "User not found" });
-      if (user.password !== oldPassword) return res.status(401).json({ error: "Incorrect current password" });
-      user.password = newPassword;
+      if (!verifyPassword(oldPassword, user.password)) {
+        return res.status(401).json({ error: "Incorrect current password" });
+      }
+      user.password = hashPassword(newPassword);
+      savePersistedDb();
+      createLog(userId, user.realName, user.role, "Password Change", "Success", "User password updated (SHA-256).", req);
       res.json({ success: true });
     });
   }
@@ -2118,10 +2136,13 @@ async function startServer() {
       }
     });
     dbRouter.post("/admin/users", (req, res) => {
+      const defaultHash = getDefaultPasswordSha256();
       const newUser = {
+        ...req.body,
         id: req.body.id || `user${Date.now()}`,
-        password: DEFAULT_PASSWORD,
-        ...req.body
+        password: req.body.password
+          ? hashPassword(req.body.password)
+          : (defaultHash || ""),
       };
       
       if (newUser.role === 'patient') {
@@ -2227,11 +2248,16 @@ async function startServer() {
     });
 
     dbRouter.post("/admin/factory-reset", (req, res) => {
+      const defaultHash = getDefaultPasswordSha256();
+      if (!defaultHash) {
+        return res.status(503).json({
+          error: "DEFAULT_PASSWORD_SHA256 is not configured in .env. Factory reset requires a default password hash.",
+        });
+      }
       console.log("[ADMIN] Factory reset initiated");
       createLog("admin", "Admin System", "admin", "Database Factory Reset", "Warning", "System reset to initial baseline configuration.", req);
-      // Clean and re-assign
       Object.keys(db_mock).forEach(key => delete db_mock[key]);
-      Object.assign(db_mock, JSON.parse(JSON.stringify(INITIAL_DB)));
+      Object.assign(db_mock, JSON.parse(JSON.stringify(createInitialDb(defaultHash))));
       savePersistedDb();
       res.json({ success: true, message: "Database reset to initial state" });
     });
@@ -2253,6 +2279,10 @@ async function startServer() {
     app.get("/api/ai/config", (req, res) => {
       const geminiAvailable = !!process.env.GEMINI_API_KEY;
       const openaiAvailable = !!process.env.OPENAI_API_KEY;
+      const awsRegionAvailable = !!process.env.AWS_REGION;
+      const awsAccessKeyAvailable = !!process.env.AWS_ACCESS_KEY;
+      const awsSecretKeyAvailable = !!process.env.AWS_SECRET_KEY;
+      const awsBedrockAvailable = awsRegionAvailable && awsAccessKeyAvailable && awsSecretKeyAvailable;
       let activeProvider = "local";
       if (geminiAvailable && openaiAvailable) {
         activeProvider = "both";
@@ -2264,6 +2294,8 @@ async function startServer() {
       res.json({
         geminiAvailable,
         openaiAvailable,
+        awsBedrockAvailable,
+        awsRegion: awsRegionAvailable ? process.env.AWS_REGION : undefined,
         activeProvider,
         bootInstanceId: BOOT_INSTANCE_ID,
         version: VERSION,
@@ -3219,7 +3251,7 @@ async function startServer() {
             activeRole,
             "MCP Server Access",
             "Success",
-            `AI Agent accessed private data via Model Context Protocol on tool [${toolName}]. Arguments: ${JSON.stringify(args || {})}`
+            `AI Agent accessed MCP using tool [${toolName}]. Arguments: ${JSON.stringify(args || {})}`
           );
         } catch (err) {
           console.error("[VITALTRUST] Failed creating MCP audit log", err);
@@ -3783,47 +3815,39 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
           });
 
         } else if (targetModelFamily === 'bedrock') {
-          const { awsAccessKey, awsSecretKey, awsRegion, awsCustomDns } = apiKeys || {};
+          const awsAccessKey = apiKeys?.awsAccessKey?.trim() || process.env.AWS_ACCESS_KEY?.trim();
+          const awsSecretKey = apiKeys?.awsSecretKey?.trim() || process.env.AWS_SECRET_KEY?.trim();
+          const awsRegion = apiKeys?.awsRegion?.trim() || process.env.AWS_REGION?.trim() || "us-east-1";
+          let awsCustomDns = apiKeys?.awsCustomDns?.trim() || "";
+          if (awsCustomDns.toLowerCase() === "null") awsCustomDns = "";
+
           if (!awsAccessKey || !awsSecretKey || !awsRegion) {
-            throw new Error("AWS Bedrock Settings are incomplete. Access Key, Secret Key, and Region are required.");
+            throw new Error("AWS Bedrock Settings are incomplete. Access Key, Secret Key, and Region are required (configure in AI Settings or set AWS_ACCESS_KEY, AWS_SECRET_KEY, and AWS_REGION in .env).");
           }
 
-          createLog(
-            uId,
-            uName,
-            uRole,
-            "AWS Bedrock Connection",
-            "Success",
-            `[AWS IAM Verified] Connecting to Bedrock in region: "${awsRegion}". Access Key ID: "${awsAccessKey.substring(0, 6)}...". Proxy Custom DNS: "${awsCustomDns || 'null'}"`,
-            req
-          );
+          const formattedTools = activeTools.map((tName) => {
+            const t = (MCP_TOOLS_SPEC as any)[tName];
+            return {
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters
+            };
+          });
 
-          const activeModelName = targetModelName;
-          const cleanedMsgLower = message.toLowerCase();
-          const patientObject = db_mock.patients.find((p: any) => p.id === uId);
-
-          let simBedrockResponse = "";
-          if (cleanedMsgLower.includes("med") || cleanedMsgLower.includes("prescription") || cleanedMsgLower.includes("pill") || cleanedMsgLower.includes("drug")) {
-            simBedrockResponse = `Hello ${uName},\n\nThis is a secure response generated via **AWS Bedrock (${activeModelName})**.\n\nI looked into your active prescription care plan securely through VitalTrust's secure database sync. Here are your medication details:\n\n* **Medications:** ${patientObject && Array.isArray(patientObject.medications) ? patientObject.medications.join(", ") : "None listed"}\n* **Care Condition:** ${patientObject ? patientObject.condition : 'N/A'}\n\nAWS Bedrock microsegmentation logs verify this query was fully isolated within VPC subnet Live-Region-1. Please let me know if you would like to ask anything else.`;
-          } else if (cleanedMsgLower.includes("vital") || cleanedMsgLower.includes("heart rate") || cleanedMsgLower.includes("bp") || cleanedMsgLower.includes("temp")) {
-            const v = patientObject?.vitals;
-            simBedrockResponse = `Hello ${uName},\n\nThis is a secure response generated via **AWS Bedrock (${activeModelName})**.\n\nAccording to your real-time secure health repository, here are your latest recorded vital signs:\n\n` +
-              `* 🫀 **Heart Rate:** ${v?.hr || 'N/A'} BPM\n` +
-              `* 🌡️ **Temperature:** ${v?.temp || 'N/A'}°F\n` +
-              `* 🩸 **Blood Pressure:** ${v?.bp || 'N/A'}\n` +
-              `* 🕒 **Recorded At:** ${v?.lastUpdated || 'N/A'}\n\nAWS Bedrock IAM posture control verified. All vitals are encrypted and transmitted privately. Let me know if you need help with anything else.`;
-          } else if (cleanedMsgLower.includes("app") || cleanedMsgLower.includes("sched") || cleanedMsgLower.includes("visit")) {
-            const userApts = db_mock.appointments.filter((a: any) => a.patientId === uId) || [];
-            let visitText = "";
-            if (userApts.length > 0) {
-              visitText = userApts.map((a: any, i: number) => `${i + 1}. **${a.date} at ${a.time}** (Reason: ${a.reason || 'General Checkup'})`).join("\n");
-            } else {
-              visitText = "No future or current visits scheduled.";
-            }
-            simBedrockResponse = `Hello ${uName},\n\nThis is a secure response generated via **AWS Bedrock (${activeModelName})**.\n\nHere are your upcoming scheduled clinical visits:\n\n${visitText}\n\nAll visit queries to the VitalT rust portal are fully protected by Cisco Secure Access ZTNA policies. Please reach out if you have any questions!`;
-          } else {
-            simBedrockResponse = `Hello ${uName}! I am your secure virtual assistant powered by **AWS Bedrock (${activeModelName})** with full IAM validation.\n\nI am connected with your personal care records in real-time. Feel free to ask me questions like:\n\n* 💊 **My medications**\n* 🫀 **My vital signs**\n* 📅 **My appointments**\n\nAll traffic is fully microsegmented and auditable. How can I help you today?`;
-          }
+          const bedrockResult = await executeBedrockChat({
+            credentials: {
+              accessKeyId: awsAccessKey,
+              secretAccessKey: awsSecretKey,
+              region: awsRegion,
+              customDns: awsCustomDns || undefined,
+            },
+            modelName: targetModelName,
+            systemPrompt,
+            history: Array.isArray(history) ? history : [],
+            userMessage: message,
+            tools: formattedTools,
+            executeTool: async (name, parsedArgs) => executeMCPTool(name, parsedArgs, uId, uRole),
+          });
 
           createLog(
             uId,
@@ -3831,20 +3855,19 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             uRole,
             "AI Assistant Conversation",
             "Success",
-            `[AWS Bedrock - ${activeModelName}] Patient asked: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`,
+            `[AWS Bedrock - ${bedrockResult.modelUsed}] Patient asked: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`,
             req
           );
 
           return res.json({
-            response: simBedrockResponse,
+            response: bedrockResult.text,
             status: "Safe",
             provider: "bedrock"
           });
         }
       } catch (err: any) {
-        console.error("[AI Assistant Error]:", err);
-
         const errorMessage = err?.message || String(err);
+        console.error("[AI Assistant Error]:", errorMessage);
         const statusMatch = errorMessage.match(/HTTP (\d{3})/i);
         const parsedStatus = statusMatch ? parseInt(statusMatch[1], 10) : 502;
         const httpStatus = parsedStatus >= 400 && parsedStatus < 600 ? parsedStatus : 502;

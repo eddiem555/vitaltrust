@@ -15,6 +15,22 @@ export default function Login({ onLogin }: LoginProps) {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [configError, setConfigError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/auth/config')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.defaultPasswordConfigured === false) {
+          setConfigError(
+            "Error: Default password not defined in .env file. Please add the 'DEFAULT_PASSWORD_SHA256' environment variable to your .env file and run DeployVitalTrust.sh again."
+          );
+        }
+      })
+      .catch(() => {
+        setConfigError(null);
+      });
+  }, []);
 
   useEffect(() => {
     // Splash screen disabled by default to restore original design behavior
@@ -93,6 +109,23 @@ export default function Login({ onLogin }: LoginProps) {
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [onLogin]);
+
+  if (configError) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+        <div className="max-w-xl w-full bg-white rounded-3xl border border-red-200 shadow-xl p-10 text-center space-y-4">
+          <div className="mx-auto w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-[#7c1a1a] border border-red-100">
+            <Shield size={28} />
+          </div>
+          <h1 className="text-xl font-bold text-slate-900">Configuration Required</h1>
+          <p className="text-sm text-slate-600 leading-relaxed">{configError}</p>
+          <p className="text-xs text-slate-400 font-mono pt-2">
+            Compute SHA-256 of your lab password locally, then set DEFAULT_PASSWORD_SHA256 in .env
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (showSplash) {
     return (
