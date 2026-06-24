@@ -2,12 +2,13 @@
  * MCP tool execution helpers — all data access goes through HTTP APIs (dbserver + auth).
  * Imported into server.ts to keep the main file maintainable.
  */
+import { canSendMessage } from "./src/messaging-rules";
 
 export type McpDbClient = {
   get: (path: string) => Promise<any>;
   post: (path: string, body: any) => Promise<any>;
   put: (path: string, body: any) => Promise<any>;
-  delete: (path: string) => Promise<any>;
+  delete: (path: string, body?: any) => Promise<any>;
 };
 
 export type McpAuthClient = {
@@ -19,17 +20,27 @@ export const ROLE_TOOLS: Record<string, string[]> = {
   patient: [
     "get_my_profile", "get_my_clinical_summary", "get_my_medications", "get_my_appointments",
     "get_my_lab_results", "get_my_billing", "get_my_messages",
-    "cancel_appointment", "reschedule_appointment",
+    "create_appointment", "update_appointment", "cancel_appointment", "reschedule_appointment",
+    "send_message", "delete_messages", "pay_bill",
     "update_my_profile", "change_my_password"
   ],
   nurse: [
     "get_ward_roster", "get_patient_vitals", "record_vitals", "get_medication_tasks",
-    "update_medication_status", "update_patient_status", "change_my_password"
+    "update_medication_status", "update_patient_status",
+    "get_all_appointments", "create_appointment", "update_appointment",
+    "cancel_appointment", "reschedule_appointment",
+    "get_my_messages", "send_message", "broadcast_message", "delete_messages",
+    "get_billing_records",
+    "update_my_profile", "change_my_password"
   ],
   doctor: [
     "get_ward_roster", "get_assigned_patient_deep_dive", "get_all_appointments",
     "get_patient_vitals", "record_vitals", "prescribe_medication", "discontinue_medication",
-    "update_patient_status", "change_my_password"
+    "update_patient_status",
+    "create_appointment", "update_appointment", "cancel_appointment", "reschedule_appointment",
+    "get_my_messages", "send_message", "broadcast_message", "delete_messages",
+    "get_billing_records",
+    "update_my_profile", "change_my_password"
   ],
   admin: [
     "query_audit_logs", "get_user_directory", "manage_user_persona", "get_infrastructure_topology",
@@ -38,11 +49,63 @@ export const ROLE_TOOLS: Record<string, string[]> = {
     "get_clinicians", "get_ward_roster", "get_assigned_patient_deep_dive", "get_all_appointments",
     "get_patient_vitals", "record_vitals", "get_medication_tasks", "update_medication_status",
     "prescribe_medication", "discontinue_medication", "update_patient_status",
+    "create_appointment", "update_appointment", "cancel_appointment", "reschedule_appointment",
+    "get_my_messages", "send_message", "broadcast_message", "delete_messages",
+    "get_billing_records",
     "get_my_profile", "get_my_clinical_summary", "get_my_medications", "get_my_appointments",
-    "get_my_lab_results", "get_my_billing", "get_my_messages",
-    "cancel_appointment", "reschedule_appointment", "update_my_profile", "change_my_password"
+    "get_my_lab_results", "get_my_billing", "pay_bill",
+    "update_my_profile", "change_my_password"
   ]
 };
+
+function canModifyAppointment(apt: any, uId: string, uRole: string): boolean {
+  if (uRole === "admin") return true;
+  if (uRole === "patient") return apt.patientId === uId;
+  if (uRole === "doctor") return apt.doctorId === uId;
+  if (uRole === "nurse") return apt.nurseId === uId;
+  return false;
+}
+
+async function getAppointmentById(db: McpDbClient, appointmentId: string): Promise<any | null> {
+  const all = await db.get("/api/dbserver/appointments");
+  if (!Array.isArray(all)) return null;
+  return all.find((a: any) => a.id === appointmentId) || null;
+}
+
+type DirectoryUser = { id: string; role: string; realName: string };
+
+async function getUserDirectory(db: McpDbClient): Promise<DirectoryUser[]> {
+  const directory = await db.get("/api/dbserver/users/directory");
+  return Array.isArray(directory) ? directory : [];
+}
+
+/** Resolve a portal user by exact id or by display-name substring (supports slug forms like charles_xavier). */
+async function resolveDirectoryUser(
+  db: McpDbClient,
+  identifier: string
+): Promise<{ user: DirectoryUser } | { error: string; matches?: DirectoryUser[] }> {
+  const directory = await getUserDirectory(db);
+  const trimmed = String(identifier || "").trim();
+  if (!trimmed) return { error: "Empty user identifier" };
+
+  const byId = directory.find((u) => u.id === trimmed);
+  if (byId) return { user: byId };
+
+  const needle = trimmed.toLowerCase().replace(/_/g, " ");
+  const matches = directory.filter((u) =>
+    String(u.realName || "").toLowerCase().includes(needle)
+  );
+  if (matches.length === 1) return { user: matches[0] };
+  if (matches.length > 1) {
+    return {
+      error: `Multiple users match "${trimmed}". Use receiverId with a specific user id.`,
+      matches: matches.map((u) => ({ id: u.id, role: u.role, realName: u.realName })),
+    };
+  }
+  return {
+    error: `No user found matching "${trimmed}". Call get_clinicians or inspect the user directory for valid ids (e.g. patient31, doctor1, nurse4).`,
+  };
+}
 
 function enrichRoster(patientsList: any) {
   if (!Array.isArray(patientsList)) return patientsList;
@@ -99,14 +162,15 @@ export async function runMcpTool(
     case "cancel_appointment": {
       const { appointmentId } = args;
       if (!appointmentId) return { error: "Missing required parameter: appointmentId" };
-      if (uRole === "admin") {
-        await db.delete(`/api/dbserver/appointments/${appointmentId}`);
-        return { success: true, message: "Appointment cancelled successfully" };
+      if (uRole !== "admin") {
+        const apt = await getAppointmentById(db, appointmentId);
+        if (!apt) return { error: "Appointment not found" };
+        if (!canModifyAppointment(apt, uId, uRole)) {
+          return { error: `Forbidden: You may only cancel appointments you are assigned to.` };
+        }
       }
-      const mine = await db.get(`/api/dbserver/appointments?patientId=${uId}`);
-      const apt = Array.isArray(mine) ? mine.find((a: any) => a.id === appointmentId) : null;
-      if (!apt) return { error: "Forbidden: Patients can only cancel their own appointments." };
-      await db.delete(`/api/dbserver/appointments/${appointmentId}`);
+      const qs = `?requesterId=${encodeURIComponent(uId)}&requesterRole=${encodeURIComponent(uRole)}`;
+      await db.delete(`/api/dbserver/appointments/${appointmentId}${qs}`);
       return { success: true, message: "Appointment cancelled successfully" };
     }
 
@@ -116,11 +180,38 @@ export async function runMcpTool(
         return { error: "Missing required parameters: appointmentId, date, time" };
       }
       if (uRole !== "admin") {
-        const mine = await db.get(`/api/dbserver/appointments?patientId=${uId}`);
-        const apt = Array.isArray(mine) ? mine.find((a: any) => a.id === appointmentId) : null;
-        if (!apt) return { error: "Forbidden: Patients can only reschedule their own appointments." };
+        const apt = await getAppointmentById(db, appointmentId);
+        if (!apt) return { error: "Appointment not found" };
+        if (!canModifyAppointment(apt, uId, uRole)) {
+          return { error: `Forbidden: You may only reschedule appointments you are assigned to.` };
+        }
       }
-      return db.put(`/api/dbserver/appointments/${appointmentId}`, { date, time });
+      return db.put(`/api/dbserver/appointments/${appointmentId}`, {
+        date,
+        time,
+        requesterId: uId,
+        requesterRole: uRole,
+      });
+    }
+
+    case "update_appointment": {
+      const { appointmentId, date, time, reason, status, doctorId, nurseId } = args;
+      if (!appointmentId) return { error: "Missing required parameter: appointmentId" };
+      if (uRole !== "admin") {
+        const apt = await getAppointmentById(db, appointmentId);
+        if (!apt) return { error: "Appointment not found" };
+        if (!canModifyAppointment(apt, uId, uRole)) {
+          return { error: `Forbidden: You may only update appointments you are assigned to.` };
+        }
+      }
+      const payload: any = { requesterId: uId, requesterRole: uRole };
+      if (date !== undefined) payload.date = date;
+      if (time !== undefined) payload.time = time;
+      if (reason !== undefined) payload.reason = reason;
+      if (status !== undefined) payload.status = status;
+      if (doctorId !== undefined) payload.doctorId = doctorId;
+      if (nurseId !== undefined) payload.nurseId = nurseId;
+      return db.put(`/api/dbserver/appointments/${appointmentId}`, payload);
     }
 
     case "update_my_profile": {
@@ -142,6 +233,127 @@ export async function runMcpTool(
       const { oldPassword, newPassword } = args;
       if (!oldPassword || !newPassword) return { error: "Both old and new passwords are required" };
       return auth.post("/api/auth/change-password", { userId: uId, oldPassword, newPassword });
+    }
+
+    case "create_appointment": {
+      const { patientId, date, time, reason, doctorId, nurseId } = args;
+      if (!date || !time || !reason) {
+        return { error: "Missing required parameters: date, time, reason" };
+      }
+      const payload: any = {
+        date,
+        time,
+        reason,
+        requesterId: uId,
+        requesterRole: uRole,
+      };
+      if (uRole === "patient") {
+        payload.patientId = uId;
+      } else if (patientId) {
+        payload.patientId = patientId;
+      } else {
+        return { error: "Missing required parameter: patientId (required for doctors, nurses, and admins)" };
+      }
+      if (doctorId) payload.doctorId = doctorId;
+      else if (uRole === "doctor") payload.doctorId = uId;
+      if (nurseId) payload.nurseId = nurseId;
+      else if (uRole === "nurse") payload.nurseId = uId;
+      return db.post("/api/dbserver/appointments", payload);
+    }
+
+    case "send_message": {
+      const { receiverId, receiverName, content } = args;
+      if (!content) return { error: "Missing required parameter: content" };
+      const lookup = receiverId || receiverName;
+      if (!lookup) {
+        return { error: "Missing required parameter: receiverId or receiverName" };
+      }
+      const resolved = await resolveDirectoryUser(db, receiverName || receiverId);
+      if ("error" in resolved) {
+        return resolved.matches
+          ? { error: resolved.error, matches: resolved.matches }
+          : { error: resolved.error };
+      }
+      const receiver = resolved.user;
+      if (receiver.id === uId) {
+        return { error: "Cannot send a message to yourself." };
+      }
+      if (!canSendMessage(uRole as any, receiver.role as any)) {
+        return { error: "Messaging policy violation: patient-to-patient messaging is not permitted." };
+      }
+      return db.post("/api/dbserver/messages", {
+        senderId: uId,
+        receiverId: receiver.id,
+        content,
+      });
+    }
+
+    case "broadcast_message": {
+      const { receiverRole, content } = args;
+      if (!content) return { error: "Missing required parameter: content" };
+      if (!receiverRole) return { error: "Missing required parameter: receiverRole (patient, nurse, doctor, or admin)" };
+      if (uRole === "patient" && String(receiverRole).toLowerCase() === "patient") {
+        return { error: "Messaging policy violation: patients cannot broadcast to other patients." };
+      }
+      return db.post("/api/dbserver/messages/broadcast", {
+        senderId: uId,
+        receiverRole: String(receiverRole).toLowerCase().trim(),
+        content,
+      });
+    }
+
+    case "delete_messages": {
+      const { messageIds, fromUserId, fromUserName } = args;
+      let ids: string[] = Array.isArray(messageIds) ? messageIds : [];
+      if (ids.length === 0) {
+        let senderId = fromUserId;
+        if (!senderId && fromUserName) {
+          const resolved = await resolveDirectoryUser(db, fromUserName);
+          if ("error" in resolved) {
+            return resolved.matches
+              ? { error: resolved.error, matches: resolved.matches }
+              : { error: resolved.error };
+          }
+          senderId = resolved.user.id;
+        }
+        if (!senderId) {
+          return { error: "Provide messageIds, fromUserId, or fromUserName to delete messages" };
+        }
+        const mine = await db.get(`/api/dbserver/messages?userId=${uId}`);
+        ids = (Array.isArray(mine) ? mine : [])
+          .filter((m: any) => m.senderId === senderId && (m.receiverId === uId || m.senderId === uId))
+          .map((m: any) => m.id);
+      }
+      if (ids.length === 0) {
+        return { success: true, deleted: 0, message: "No matching messages to delete" };
+      }
+      return db.delete("/api/dbserver/messages", { ids, userId: uId });
+    }
+
+    case "pay_bill": {
+      const { billingId } = args;
+      if (!billingId) return { error: "Missing required parameter: billingId" };
+      if (uRole === "patient") {
+        const mine = await db.get(`/api/dbserver/billing?patientId=${uId}`);
+        const bill = Array.isArray(mine) ? mine.find((b: any) => b.id === billingId) : null;
+        if (!bill) return { error: "Forbidden: Patients can only pay their own billing records." };
+      }
+      return db.put(`/api/dbserver/billing/${billingId}`, { status: "paid" });
+    }
+
+    case "get_billing_records": {
+      if (uRole !== "admin" && uRole !== "doctor" && uRole !== "nurse") {
+        return { error: "Forbidden: Clinicians and administrators only. Patients use get_my_billing." };
+      }
+      const { patientId, doctorId, nurseId } = args || {};
+      const params = new URLSearchParams();
+      if (patientId) params.set("patientId", patientId);
+      if (doctorId) params.set("doctorId", doctorId);
+      else if (uRole === "doctor") params.set("doctorId", uId);
+      if (nurseId) params.set("nurseId", nurseId);
+      else if (uRole === "nurse") params.set("nurseId", uId);
+      const qs = params.toString();
+      return db.get(`/api/dbserver/billing${qs ? `?${qs}` : ""}`);
     }
 
     // --- NURSE (mirrors NurseDashboard + Patients staff actions) ---
@@ -202,13 +414,18 @@ export async function runMcpTool(
     }
 
     case "get_all_appointments": {
-      if (uRole !== "doctor" && uRole !== "admin") return { error: "Forbidden: Doctors and administrators only" };
-      const { patientId, doctorId } = args || {};
+      if (uRole !== "doctor" && uRole !== "admin" && uRole !== "nurse") {
+        return { error: "Forbidden: Clinical staff and administrators only" };
+      }
+      const { patientId, doctorId, nurseId } = args || {};
       if (patientId) {
         return db.get(`/api/dbserver/appointments?patientId=${patientId}`);
       }
       if (doctorId) {
         return db.get(`/api/dbserver/appointments?doctorId=${doctorId}`);
+      }
+      if (nurseId) {
+        return db.get(`/api/dbserver/appointments?nurseId=${nurseId}`);
       }
       if (uRole === "admin") {
         const [appointments, patients] = await Promise.all([
@@ -228,7 +445,11 @@ export async function runMcpTool(
           };
         });
       }
-      return db.get(`/api/dbserver/appointments?doctorId=${uId}`);
+      if (uRole === "doctor") {
+        return db.get(`/api/dbserver/appointments?doctorId=${uId}`);
+      }
+      // Nurses: return full schedule (matches web UI); pass nurseId arg to filter to own queue
+      return db.get("/api/dbserver/appointments");
     }
 
     case "get_clinicians": {

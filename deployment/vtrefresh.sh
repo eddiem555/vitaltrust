@@ -23,5 +23,11 @@ if [ ! -d /tmp/vitaltrust/deployment ] ; then
 fi
 
 rm -f /tmp/vitaltrust.zip
+
+# Drop any stale database artifacts from prior installs (container is recreated without volumes)
+rm -f /tmp/vitaltrust/persistent_db.json
+rm -f /tmp/vitaltrust/deployment_config.json
+rm -f /tmp/vitaltrust/system_console.log
+
 cp /home/ubuntu/.env /tmp/vitaltrust
 bash /tmp/vitaltrust/deployment/DeployVitalTrust.sh

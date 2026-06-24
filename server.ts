@@ -10,6 +10,7 @@ import { canSendMessage } from "./src/messaging-rules";
 import { careTeamForPatientIndex } from "./src/appointments";
 import { VERSION, VERSION_DATE } from "./src/version";
 import fs from "fs";
+import crypto from "crypto";
 import * as dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { ROLE_TOOLS, runMcpTool } from "./server-mcp-tools";
@@ -85,6 +86,10 @@ console.info = (...args: any[]) => {
 rotateConsoleLogFile();
 
 console.log("[VITALTRUST] Server process starting...");
+
+/** Unique per process start — clients use this to discard stale browser-side AI chat history after redeploy. */
+const BOOT_INSTANCE_ID = crypto.randomUUID();
+console.log(`[VITALTRUST] Boot instance id: ${BOOT_INSTANCE_ID}`);
 
 process.on("uncaughtException", (err) => {
   console.error("[CRITICAL] Uncaught Exception:", err);
@@ -1431,7 +1436,11 @@ async function startServer() {
                 date: "2026-08-02",
                 description: "EHR Account Setup and Comprehensive Baseline Diagnostics",
                 amount: 145,
-                status: "paid"
+                status: "paid",
+                doctorId: randomDoctorId,
+                doctorName: randomDoctorName,
+                nurseId: randomNurseId,
+                nurseName: randomNurseName,
               });
 
               // Seed welcome messaging
@@ -1603,7 +1612,7 @@ async function startServer() {
       } = req.body;
       const idx = db_mock.users.findIndex((u: any) => u.id === id);
       if (idx !== -1) {
-        db_mock.users[idx].realName = realName;
+        if (realName !== undefined) db_mock.users[idx].realName = realName;
         if (email !== undefined) db_mock.users[idx].email = email;
         if (phone !== undefined) db_mock.users[idx].phone = phone;
         if (address !== undefined) db_mock.users[idx].address = address;
@@ -1620,7 +1629,7 @@ async function startServer() {
         // Keep Corresponding Clinical Patient Record Sync'd if user is a Patient
         const patientIdx = db_mock.patients.findIndex((p: any) => p.id === id);
         if (patientIdx !== -1) {
-          db_mock.patients[patientIdx].name = realName;
+          if (realName !== undefined) db_mock.patients[patientIdx].name = realName;
           if (email !== undefined) db_mock.patients[patientIdx].email = email;
           if (phone !== undefined) db_mock.patients[patientIdx].phone = phone;
           if (address !== undefined) db_mock.patients[patientIdx].address = address;
@@ -1892,8 +1901,12 @@ async function startServer() {
       res.status(204).send();
     });
     dbRouter.get("/billing", (req, res) => {
-      const { patientId } = req.query;
-      res.json(patientId ? db_mock.billing.filter((b: any) => b.patientId === patientId) : db_mock.billing);
+      const { patientId, doctorId, nurseId } = req.query as Record<string, string | undefined>;
+      let results = db_mock.billing;
+      if (patientId) results = results.filter((b: any) => b.patientId === patientId);
+      if (doctorId) results = results.filter((b: any) => b.doctorId === doctorId);
+      if (nurseId) results = results.filter((b: any) => b.nurseId === nurseId);
+      res.json(results);
     });
     dbRouter.put("/billing/:id", (req, res) => {
       const { status } = req.body;
@@ -2003,6 +2016,56 @@ async function startServer() {
       savePersistedDb();
       createLog(senderId, "Messaging Service", "user", "Secure Message Sent", "Success", `Message sent to ${receiverId}`, req);
       res.status(201).json({ success: true, message: newMsg });
+    });
+    dbRouter.post("/messages/broadcast", (req, res) => {
+      const { senderId, receiverRole, content } = req.body;
+      if (!senderId || !receiverRole || !content) {
+        return res.status(400).json({ error: "senderId, receiverRole, and content are required" });
+      }
+      const role = String(receiverRole).toLowerCase().trim();
+      const validRoles = ["patient", "nurse", "doctor", "admin"];
+      if (!validRoles.includes(role)) {
+        return res.status(400).json({ error: "receiverRole must be patient, nurse, doctor, or admin" });
+      }
+      const sender = db_mock.users.find((u: any) => u.id === senderId);
+      if (!sender) {
+        return res.status(400).json({ error: "Invalid sender" });
+      }
+      if (sender.role === "patient" && role === "patient") {
+        return res.status(403).json({ error: "Messaging policy violation: patients cannot broadcast to other patients" });
+      }
+      const recipients = db_mock.users.filter(
+        (u: any) => u.role === role && u.id !== senderId && canSendMessage(sender.role, u.role)
+      );
+      if (recipients.length === 0) {
+        return res.status(400).json({ error: `No eligible recipients found for role: ${role}` });
+      }
+      const now = Date.now();
+      const created = recipients.map((receiver: any, index: number) => ({
+        id: `msg${now}_${index}`,
+        senderId,
+        receiverId: receiver.id,
+        content,
+        timestamp: new Date().toISOString(),
+      }));
+      db_mock.messages.push(...created);
+      savePersistedDb();
+      createLog(
+        senderId,
+        sender.realName || "Messaging Service",
+        sender.role,
+        "Secure Broadcast Message Sent",
+        "Success",
+        `Broadcast to ${recipients.length} ${role}(s): ${content.substring(0, 80)}`,
+        req
+      );
+      res.status(201).json({
+        success: true,
+        sent: created.length,
+        receiverRole: role,
+        recipientIds: recipients.map((r: any) => r.id),
+        recipientNames: recipients.map((r: any) => r.realName),
+      });
     });
     dbRouter.delete("/messages", (req, res) => {
       const { ids, userId } = req.body;
@@ -2201,7 +2264,9 @@ async function startServer() {
       res.json({
         geminiAvailable,
         openaiAvailable,
-        activeProvider
+        activeProvider,
+        bootInstanceId: BOOT_INSTANCE_ID,
+        version: VERSION,
       });
     });
 
@@ -2815,12 +2880,13 @@ async function startServer() {
         },
         get_all_appointments: {
           name: "get_all_appointments",
-          description: "Retrieve scheduled clinical appointments. Doctors receive their own queue. Administrators receive all appointments enriched with patient care-team assignments (assignedDoctorId, assignedNurseId). Optionally filter by patientId or doctorId.",
+          description: "Retrieve scheduled clinical appointments. Doctors default to their own queue. Nurses receive the full schedule (pass nurseId to filter to their assigned queue). Administrators receive all appointments enriched with patient care-team assignments. Optionally filter by patientId, doctorId, or nurseId.",
           parameters: {
             type: "object",
             properties: {
               patientId: { type: "string", description: "Optional patient ID to filter by." },
-              doctorId: { type: "string", description: "Optional doctor ID to filter by." }
+              doctorId: { type: "string", description: "Optional doctor ID to filter by." },
+              nurseId: { type: "string", description: "Optional nurse ID to filter by (defaults to logged-in nurse when asking for 'my appointments')." }
             },
             required: []
           }
@@ -2836,7 +2902,7 @@ async function startServer() {
         },
         cancel_appointment: {
           name: "cancel_appointment",
-          description: "Directly deletes or cancels a patient's scheduled appointment using its ID.",
+          description: "Delete or cancel a scheduled appointment by ID. Patients may cancel their own visits; doctors and nurses may cancel appointments they are assigned to; administrators may cancel any appointment.",
           parameters: {
             type: "object",
             properties: {
@@ -2847,7 +2913,7 @@ async function startServer() {
         },
         reschedule_appointment: {
           name: "reschedule_appointment",
-          description: "Directly reschedule an existing appointment to a new date and time.",
+          description: "Reschedule an existing appointment to a new date and time. Same authorization rules as cancel_appointment.",
           parameters: {
             type: "object",
             properties: {
@@ -2858,13 +2924,30 @@ async function startServer() {
             required: ["appointmentId", "date", "time"]
           }
         },
+        update_appointment: {
+          name: "update_appointment",
+          description: "Update an appointment's date, time, reason, status, doctor, or nurse. Same authorization rules as cancel_appointment.",
+          parameters: {
+            type: "object",
+            properties: {
+              appointmentId: { type: "string", description: "The ID of the appointment to update." },
+              date: { type: "string", description: "New date in YYYY-MM-DD format." },
+              time: { type: "string", description: "New time (e.g. 2:30 PM)." },
+              reason: { type: "string", description: "Visit reason or description." },
+              status: { type: "string", description: "Appointment status: confirmed, pending, completed, or cancelled." },
+              doctorId: { type: "string", description: "Assigned doctor user ID." },
+              nurseId: { type: "string", description: "Assigned nurse user ID." }
+            },
+            required: ["appointmentId"]
+          }
+        },
         create_appointment: {
           name: "create_appointment",
           description: "Schedule a new clinical appointment.",
           parameters: {
             type: "object",
             properties: {
-              patientId: { type: "string", description: "The ID of the target patient (required for doctors/admins; patients default to themselves)." },
+              patientId: { type: "string", description: "The ID of the target patient (required for doctors/nurses/admins; patients default to themselves). The logged-in doctor or nurse is auto-assigned when omitted." },
               date: { type: "string", description: "The desired date in YYYY-MM-DD format." },
               time: { type: "string", description: "The desired time in HH:MM format." },
               reason: { type: "string", description: "Reason for the patient visit." }
@@ -2874,14 +2957,27 @@ async function startServer() {
         },
         send_message: {
           name: "send_message",
-          description: "Send a clinical messaging log or conversational message to another user.",
+          description: "Send a secure message to another portal user. Provide receiverId (e.g. patient31, doctor1) or receiverName (e.g. Charles Xavier). Display names and slug forms like charles_xavier are resolved automatically.",
           parameters: {
             type: "object",
             properties: {
-              receiverId: { type: "string", description: "The user ID of the recipient." },
+              receiverId: { type: "string", description: "Recipient user ID (preferred when known)." },
+              receiverName: { type: "string", description: "Recipient display name when ID is unknown." },
               content: { type: "string", description: "Text content of the message." }
             },
-            required: ["receiverId", "content"]
+            required: ["content"]
+          }
+        },
+        broadcast_message: {
+          name: "broadcast_message",
+          description: "Send the same message to every portal user with a given role (patient, nurse, doctor, or admin). Use for requests like 'message all nurses' or 'notify all patients'. Excludes the sender. Patients cannot broadcast to the patient role.",
+          parameters: {
+            type: "object",
+            properties: {
+              receiverRole: { type: "string", description: "Target role: patient, nurse, doctor, or admin." },
+              content: { type: "string", description: "Message text to send to each recipient." }
+            },
+            required: ["receiverRole", "content"]
           }
         },
         pay_bill: {
@@ -2893,6 +2989,36 @@ async function startServer() {
               billingId: { type: "string", description: "The ID of the billing record." }
             },
             required: ["billingId"]
+          }
+        },
+        delete_messages: {
+          name: "delete_messages",
+          description: "Delete one or more messages from the user's mailbox. Provide messageIds, or fromUserId/fromUserName to delete all messages from a specific sender.",
+          parameters: {
+            type: "object",
+            properties: {
+              messageIds: {
+                type: "array",
+                items: { type: "string" },
+                description: "Explicit message IDs to delete (must belong to the user's mailbox)."
+              },
+              fromUserId: { type: "string", description: "Delete all messages from this sender in the user's mailbox." },
+              fromUserName: { type: "string", description: "Delete all messages from a sender matched by display name (e.g. 'Nurse Ratched')." }
+            },
+            required: []
+          }
+        },
+        get_billing_records: {
+          name: "get_billing_records",
+          description: "Query billing records by patientId, doctorId, or nurseId. Doctors and nurses default to their own clinician ID when no filter is given. Administrators may query all records.",
+          parameters: {
+            type: "object",
+            properties: {
+              patientId: { type: "string", description: "Filter by patient user ID." },
+              doctorId: { type: "string", description: "Filter by attending doctor user ID." },
+              nurseId: { type: "string", description: "Filter by attending nurse user ID." }
+            },
+            required: []
           }
         },
         update_my_profile: {
@@ -3127,8 +3253,13 @@ async function startServer() {
             if (!response.ok) throw new Error(`DB Server error: ${response.status} ${response.statusText}`);
             return parseApiJson(response);
           },
-          delete: async (path: string) => {
-            const response = await fetch(`${dbBase}${path}`, { method: "DELETE", signal: AbortSignal.timeout(10000) });
+          delete: async (path: string, body?: any) => {
+            const response = await fetch(`${dbBase}${path}`, {
+              method: "DELETE",
+              headers: body ? { "Content-Type": "application/json" } : undefined,
+              body: body ? JSON.stringify(body) : undefined,
+              signal: AbortSignal.timeout(10000)
+            });
             if (!response.ok) throw new Error(`DB Server error: ${response.status} ${response.statusText}`);
             return parseApiJson(response);
           }
@@ -3179,10 +3310,10 @@ async function startServer() {
       };
 
       const mcpCapabilitiesByRole: Record<string, string> = {
-        admin: `Your MCP tools include full enterprise access: user directory, audit logs, system configuration, care-team assignment, and all clinical records (patients, appointments, medications, vitals). Prefer get_all_appointments for schedule reporting, get_ward_roster for patient-to-clinician mappings, and get_clinicians for staff lookups.`,
-        doctor: `Your MCP tools support clinical workflows: ward roster, assigned patient charts (get_assigned_patient_deep_dive), your appointment queue (get_all_appointments), vitals, prescribing, and patient status updates.`,
-        nurse: `Your MCP tools support bedside workflows: ward roster, patient vitals, medication administration tasks (MAR), and patient status updates.`,
-        patient: `Your MCP tools expose your own health record: profile, medications, appointments, lab results, billing, and messages. Appointment cancel/reschedule applies only to your visits.`
+        admin: `Your MCP tools include full enterprise access: user directory, audit logs, system configuration, care-team assignment, billing queries (get_billing_records), messaging, and all clinical records (patients, appointments, medications, vitals). Prefer get_all_appointments for schedule reporting, get_ward_roster for patient-to-clinician mappings, and get_clinicians for staff lookups.`,
+        doctor: `Your MCP tools support clinical workflows: ward roster, assigned patient charts (get_assigned_patient_deep_dive), your appointment queue (get_all_appointments), vitals, prescribing, patient status updates, messaging, and billing queries for your clinician ID (get_billing_records).`,
+        nurse: `Your MCP tools support bedside workflows: ward roster, patient vitals, medication administration tasks (MAR), patient status updates, messaging (send_message for one recipient, broadcast_message for all users in a role), billing queries (get_billing_records), and full appointment management for visits where you are the assigned nurse.`,
+        patient: `Your MCP tools expose your own health record: profile, medications, appointments, lab results, billing, and messages. Use update_my_profile for profile changes, delete_messages to remove messages, send_message to compose, and create_appointment to schedule visits.`
       };
       const roleMcpGuidance = mcpCapabilitiesByRole[uRole] || mcpCapabilitiesByRole.patient;
 
@@ -3192,8 +3323,16 @@ General assistance:
 - Answer any user question naturally, including casual conversation, creative writing, and general knowledge. Vital Trust does not restrict prompts by login role.
 
 Private Vital Trust data (MCP — required for EHR data):
-- When the user asks about VitalT rust patients, schedules, medications, vitals, billing, audit logs, users, or system configuration, you MUST call the appropriate MCP tools to read or mutate that data. Never invent, guess, or paste private clinical/PHI data from memory.
+- When the user asks about Vital Trust patients, schedules, medications, vitals, billing, audit logs, users, or system configuration, you MUST call the appropriate MCP tools to read or mutate that data. Never invent, guess, or paste private clinical/PHI data from memory.
 - Each MCP tool calls the same authenticated REST APIs used by the web portal. Tool authorization is enforced server-side per role.
+
+Critical mutation rules (create / update / delete):
+- For ANY request to change data (profile fields, phone, email, messages, appointments, billing payment, etc.), you MUST call the matching MCP tool BEFORE telling the user the action succeeded.
+- NEVER claim an action succeeded unless the tool response confirms success or returns the updated record.
+- Profile updates: call update_my_profile with explicit fields (e.g. phone: "555-123-4567").
+- Message deletion: call get_my_messages first if needed, then delete_messages with messageIds or fromUserName/fromUserId.
+- Role broadcasts ("message all nurses/patients/doctors"): call broadcast_message with receiverRole and content — do not loop send_message manually.
+- After a successful update_my_profile, you may summarize what changed based on the tool response only.
 
 ${roleMcpGuidance}
 
@@ -3209,10 +3348,10 @@ MCP tool scoping for self-references (when using tools, not for refusing other q
 4. Administrator (role: "admin"): do not filter clinical data to a single user unless explicitly asked — system-wide visibility.
 
 Appointment MCP notes:
-- Doctors: get_all_appointments returns their queue (filtered by doctorId).
+- Doctors: get_all_appointments returns their queue by default (pass doctorId to query others).
+- Nurses: get_all_appointments returns the full schedule (pass nurseId "${uId}" for only their assigned visits). Create/update/cancel/reschedule only on appointments where nurseId equals "${uId}".
 - Administrators: get_all_appointments returns all appointments with care-team assignments.
-- Patients: view/reschedule/cancel only their own appointments.
-- Nurses: correlate schedules via get_ward_roster patient assignments; appointment management is not a nurse MCP action in this portal.
+- Patients: view via get_my_appointments; create/update/cancel/reschedule only their own visits.
 
 If asked which model you use, say you correspond to configuration: ${targetModelName}.
 Be helpful, clear, and use markdown bullet lists when presenting structured data.`;

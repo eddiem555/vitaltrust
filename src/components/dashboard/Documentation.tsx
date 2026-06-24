@@ -3,22 +3,10 @@ import {
   BookOpen, 
   Shield, 
   Cpu, 
-  Database, 
-  Activity, 
-  FileText, 
-  CheckCircle2, 
   Terminal, 
-  ArrowRight, 
-  Lock, 
   Settings, 
   Search, 
-  Filter, 
-  Server, 
-  User, 
-  Key,
-  Flame,
-  UserCheck,
-  AlertTriangle
+  Filter
 } from 'lucide-react';
 import { User as UserType } from '../../types';
 
@@ -36,418 +24,423 @@ interface MCPToolDoc {
 }
 
 export default function Documentation({ user }: DocumentationProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'mcp' | 'architecture' | 'integrations' | 'security_matrix'>('mcp');
+  const [activeSubTab, setActiveSubTab] = useState<'mcp' | 'integrations'>('mcp');
   const [mcpSearch, setMcpSearch] = useState('');
   const [mcpRoleFilter, setMcpRoleFilter] = useState<string>('all');
   const [selectedTool, setSelectedTool] = useState<string | null>('get_my_profile');
 
-  // Directory of all 35 MCP Tools
+  // MCP tool registry — synced with server-mcp-tools.ts ROLE_TOOLS (v3.0.341)
   const mcpTools: MCPToolDoc[] = [
     {
       name: "get_my_profile",
-      description: "Get the profile details of the current logged-in patient.",
+      description: "Get profile details for the logged-in user (patient, clinician, or admin).",
       role: "patient",
       parameters: {},
       samplePayload: {},
-      securityImpact: "Requires HIPAA compliant identity lookup. Cleared using federated OIDC."
+      securityImpact: "Identity lookup scoped to the authenticated session. Same REST API as the profile modal."
     },
     {
       name: "get_my_clinical_summary",
-      description: "Retrieve active condition, DOB, clinical status and doctor-assigned logs of the current logged-in patient.",
+      description: "Retrieve active condition, DOB, clinical status, and care-team assignments for the logged-in patient.",
       role: "patient",
       parameters: {},
       samplePayload: {},
-      securityImpact: "Exposes critical PHI (Protected Health Information); guarded by standard portal authorization."
+      securityImpact: "Exposes PHI; authorized only for patient role via server-side tool filtering."
     },
     {
       name: "get_my_medications",
-      description: "Get a detailed list of active prescriptions and medication administration records for the current patient.",
+      description: "List active prescriptions and medication records for the logged-in patient.",
       role: "patient",
       parameters: {},
       samplePayload: {},
-      securityImpact: "Exposes active drug regimens. Retreived over client-isolated TLS."
+      securityImpact: "Read-only access to medication registry for the authenticated patient."
     },
     {
       name: "get_my_appointments",
-      description: "List all scheduled appointments and physician meetings for the current patient.",
+      description: "List scheduled appointments for the logged-in patient.",
       role: "patient",
       parameters: {},
       samplePayload: {},
-      securityImpact: "HIPAA-regulated scheduler access rule applied."
-    },
-    {
-      name: "manage_my_appointment",
-      description: "Reschedule or cancel an existing appointment, or secure a new appointment slot.",
-      role: "patient",
-      parameters: {
-        action: { type: "string", description: "The scheduling operation to perform: 'create', 'update', or 'cancel'.", required: true },
-        appointmentId: { type: "string", description: "The ID of the appointment to modify or cancel (leave empty if creating a new one).", required: false },
-        date: { type: "string", description: "The desired date for the appointment in YYYY-MM-DD format.", required: false },
-        time: { type: "string", description: "The desired time for the appointment in HH:MM format.", required: false },
-        reason: { type: "string", description: "The medical concern or reason for clinical visit.", required: false }
-      },
-      samplePayload: { action: "create", date: "2026-06-15", time: "14:30", reason: "Annual physical checkup" },
-      securityImpact: "Writes scheduling state to dbserver; sanitized to prevent parameter injection."
+      securityImpact: "Patient-scoped appointment read via dbserver API."
     },
     {
       name: "get_my_lab_results",
-      description: "Fetch comprehensive checking laboratory parameters and diagnostic outcomes for the current patient.",
+      description: "Fetch laboratory results and diagnostic outcomes for the logged-in patient.",
       role: "patient",
       parameters: {},
       samplePayload: {},
-      securityImpact: "Guards detailed metabolic and biological findings with advanced clinical access logs."
+      securityImpact: "Clinical lab data restricted to patient identity."
     },
     {
       name: "get_my_billing",
-      description: "Get financial billing records and unpaid invoices for the current patient.",
+      description: "Get billing records and invoice status for the logged-in patient.",
       role: "patient",
       parameters: {},
       samplePayload: {},
-      securityImpact: "PCI-DSS elements protected; credentials are encrypted in-transit."
+      securityImpact: "Financial records scoped to patientId; includes doctor/nurse attribution on each bill."
     },
     {
       name: "get_my_messages",
-      description: "Get list of message history and conversations of the patient.",
-      role: "patient",
-      parameters: {},
-      samplePayload: {},
-      securityImpact: "Patient-Physician secure messaging envelope validation."
-    },
-    {
-      name: "get_ward_roster",
-      description: "Get the clinical roster of patients registered on the nursing ward.",
-      role: "nurse",
-      parameters: {},
-      samplePayload: {},
-      securityImpact: "Inpatient roster exposure. Only accessible when Nurse role is verified at Node Level."
-    },
-    {
-      name: "get_patient_vitals",
-      description: "Retrieve logged clinical vitals for a specific patient by ID.",
-      role: "nurse",
-      parameters: {
-        patientId: { type: "string", description: "The ID of the target patient.", required: true }
-      },
-      samplePayload: { patientId: "patient5" },
-      securityImpact: "Real-time biometric monitoring metrics. Authorized for nursing & doctor profiles."
-    },
-    {
-      name: "record_vitals",
-      description: "Overwrites or adds standard vitals (Heart rate, Blood Pressure, Temperature) for a specific patient.",
-      role: "nurse",
-      parameters: {
-        patientId: { type: "string", description: "The ID of the patient.", required: true },
-        hr: { type: "string", description: "Target heart rate in beats per minute (e.g. '78').", required: true },
-        temp: { type: "string", description: "Body Temperature in degrees Fahrenheit (e.g. '98.6').", required: true },
-        bp: { type: "string", description: "Arterial pressure in BP format (e.g. '120/80').", required: true }
-      },
-      samplePayload: { patientId: "patient2", hr: "72", temp: "98.4", bp: "118/75" },
-      securityImpact: "Modifies biomedical record data. Audited with cryptographic timestamps on dbserver."
-    },
-    {
-      name: "get_medication_tasks",
-      description: "Check pending bedside medication administration list and checklist schedules on the nursing ward.",
-      role: "nurse",
-      parameters: {},
-      samplePayload: {},
-      securityImpact: "Prevents treatment administration slip-ups. Strictly matches ward boundary assignment."
-    },
-    {
-      name: "update_medication_status",
-      description: "Mark a clinical medication item status as completed/administered or pending.",
-      role: "nurse",
-      parameters: {
-        medId: { type: "string", description: "The target medication schedule task ID.", required: true },
-        status: { type: "string", description: "Desired status: 'administered' or 'pending'.", required: true }
-      },
-      samplePayload: { medId: "med3", status: "administered" },
-      securityImpact: "Triggers clinical event logging. High audit-trail dependency."
-    },
-    {
-      name: "get_assigned_patient_deep_dive",
-      description: "Retrieve comprehensive historical health records of a single patient (condition, SSN, Insurance, notes, clinical vitals). Only accessible by doctors or admins.",
-      role: "doctor",
-      parameters: {
-        patientId: { type: "string", description: "The ID of the patient.", required: true }
-      },
-      samplePayload: { patientId: "patient5" },
-      securityImpact: "Exerts complete access to raw PHI. Trigger Cisco Duo STEP-UP MFA before revealing."
-    },
-    {
-      name: "search_clinical_knowledge",
-      description: "Clinical research RAG search hook for physical diagnosis guidelines, medications or clinical literature.",
-      role: "doctor",
-      parameters: {
-        query: { type: "string", description: "Search query containing clinical terms or symptoms.", required: true }
-      },
-      samplePayload: { query: "Lisinopril therapy for diabetic hypertension" },
-      securityImpact: "External clinical database sync hook; checked via secure outbound ZTNA."
-    },
-    {
-      name: "prescribe_medication",
-      description: "Dose and prescribe a new medication regimen for an active patient.",
-      role: "doctor",
-      parameters: {
-        patientId: { type: "string", description: "The index ID of the target patient.", required: true },
-        name: { type: "string", description: "Generic drug or prescription brand names (e.g. 'Lisinopril').", required: true },
-        dosage: { type: "string", description: "Quantity/dosage strength (e.g., '10mg').", required: true },
-        frequency: { type: "string", description: "Intake scheduling interval (e.g., 'once daily').", required: true }
-      },
-      samplePayload: { patientId: "patient5", name: "Atorvastatin", dosage: "20mg", frequency: "once daily at dinner" },
-      securityImpact: "Requires active DEA/NPI validation inside JWT token headers."
-    },
-    {
-      name: "update_diagnostic_notes",
-      description: "Appends or updates diagnostic clinical observations to a patient's primary record.",
-      role: "doctor",
-      parameters: {
-        patientId: { type: "string", description: "The ID of the target patient.", required: true },
-        notes: { type: "string", description: "Detailed medical evaluation text to record.", required: true }
-      },
-      samplePayload: { patientId: "patient1", notes: "Slight improvements in blood pressure. Advised lower salt intake." },
-      securityImpact: "Direct override permission for patient charts. Requires dual-peer handshake or physician key."
-    },
-    {
-      name: "query_audit_logs",
-      description: "Admin search to query security audit entries, SSO multi-cloud logs, access controls, or policy logs.",
-      role: "admin",
-      parameters: {},
-      samplePayload: {},
-      securityImpact: "High-security audit trail inspection. Strictly restricted to administrative system access."
-    },
-    {
-      name: "get_user_directory",
-      description: "Gets the central directory of registered active portal users and Identity mappings.",
-      role: "admin",
-      parameters: {},
-      samplePayload: {},
-      securityImpact: "Exposes directory structure and federated IDs. Protected by strict identity compliance maps."
-    },
-    {
-      name: "manage_user_persona",
-      description: "Edit user credentials, passwords, profiles, clearance levels and internal security configurations.",
-      role: "admin",
-      parameters: {
-        userId: { type: "string", description: "The target ID of the user.", required: true },
-        clearanceLevel: { type: "number", description: "The numerical classification security clearance level (1 to 3).", required: false },
-        role: { type: "string", description: "System security role boundary (e.g. 'admin', 'doctor', 'nurse', 'patient').", required: false },
-        internal_notes: { type: "string", description: "Administrative evaluation records.", required: false },
-        realName: { type: "string", description: "Updated full legal name.", required: false },
-        email: { type: "string", description: "Updated contact email address.", required: false },
-        phone: { type: "string", description: "Updated contact phone number.", required: false },
-        address: { type: "string", description: "Updated residential/practice address.", required: false },
-        ssn: { type: "string", description: "Updated Social Security Number.", required: false },
-        insurance_id: { type: "string", description: "Updated Insurance ID.", required: false },
-        npi_number: { type: "string", description: "Updated National Provider Identifier (NPI).", required: false },
-        assigned_ward: { type: "string", description: "Updated designated ward.", required: false },
-        clinical_notes: { type: "string", description: "Updated clinical/medical history notes.", required: false }
-      },
-      samplePayload: { userId: "nurse1", role: "nurse", clearanceLevel: 2, phone: "555-0199", internal_notes: "Completed annual HIPAA security audit refresh" },
-      securityImpact: "Alters identity authorization credentials. Heavily logged in audit trail."
-    },
-    {
-      name: "get_infrastructure_topology",
-      description: "Retrieve enterprise infrastructure topology layout details (appserver, dbserver, aibroker, multi-cloud boundaries).",
+      description: "Retrieve inbox and sent message history for the logged-in user.",
       role: "all",
       parameters: {},
       samplePayload: {},
-      securityImpact: "Shows segmented boundaries. Only serves generic topology diagrams to regular accounts."
+      securityImpact: "Secure messaging envelope; available to all roles with Messages nav access."
     },
     {
-      name: "emergency_system_reset",
-      description: "Trigger comprehensive diagnostic emergency baseline reset of the EHR system database back to initial defaults.",
-      role: "admin",
-      parameters: {},
-      samplePayload: {},
-      securityImpact: "Destructive event! Demands multiple admin authorizations and triggers absolute audit alarm logging."
+      name: "create_appointment",
+      description: "Schedule a new clinical appointment. Patients default to themselves; doctors and nurses must supply patientId and are auto-assigned as clinician.",
+      role: "all",
+      parameters: {
+        patientId: { type: "string", description: "Target patient ID (required for doctors, nurses, admins).", required: false },
+        date: { type: "string", description: "Date in YYYY-MM-DD format.", required: true },
+        time: { type: "string", description: "Time (e.g. 2:30 PM).", required: true },
+        reason: { type: "string", description: "Reason for the visit.", required: true },
+        doctorId: { type: "string", description: "Optional assigned doctor user ID.", required: false },
+        nurseId: { type: "string", description: "Optional assigned nurse user ID.", required: false }
+      },
+      samplePayload: { patientId: "patient3", date: "2026-07-15", time: "2:30 PM", reason: "Post-op review" },
+      securityImpact: "Writes to dbserver appointments; requesterId/requesterRole forwarded for authorization."
+    },
+    {
+      name: "update_appointment",
+      description: "Update date, time, reason, status, doctor, or nurse on an existing appointment. Authorization matches web UI: patients (own), doctors/nurses (assigned), admins (any).",
+      role: "all",
+      parameters: {
+        appointmentId: { type: "string", description: "Appointment ID to update.", required: true },
+        date: { type: "string", description: "New date in YYYY-MM-DD format.", required: false },
+        time: { type: "string", description: "New time.", required: false },
+        reason: { type: "string", description: "Visit reason or description.", required: false },
+        status: { type: "string", description: "confirmed, pending, completed, or cancelled.", required: false },
+        doctorId: { type: "string", description: "Assigned doctor user ID.", required: false },
+        nurseId: { type: "string", description: "Assigned nurse user ID.", required: false }
+      },
+      samplePayload: { appointmentId: "apt124", status: "confirmed", reason: "Follow-up check" },
+      securityImpact: "Full appointment edit parity with Appointments panel."
     },
     {
       name: "cancel_appointment",
-      description: "Directly deletes or cancels a patient's scheduled appointment using its ID.",
+      description: "Delete or cancel an appointment by ID. Same authorization rules as update_appointment.",
       role: "all",
       parameters: {
         appointmentId: { type: "string", description: "The ID of the appointment to cancel.", required: true }
       },
       samplePayload: { appointmentId: "apt124" },
-      securityImpact: "Allows patients and clinicians to void future visits securely."
+      securityImpact: "Destructive scheduling action; requester credentials validated server-side."
     },
     {
       name: "reschedule_appointment",
-      description: "Directly reschedule an existing appointment to a new date and time.",
+      description: "Change an appointment date and time. Same authorization rules as cancel_appointment.",
       role: "all",
       parameters: {
-        appointmentId: { type: "string", description: "The ID of the appointment to reschedule.", required: true },
-        date: { type: "string", description: "The desired date in YYYY-MM-DD format.", required: true },
-        time: { type: "string", description: "The desired time in HH:MM format.", required: true }
+        appointmentId: { type: "string", description: "The ID of the appointment.", required: true },
+        date: { type: "string", description: "New date in YYYY-MM-DD format.", required: true },
+        time: { type: "string", description: "New time.", required: true }
       },
-      samplePayload: { appointmentId: "apt124", date: "2026-06-18", time: "10:30" },
-      securityImpact: "Updates scheduling registries safely with full identity logging."
-    },
-    {
-      name: "create_appointment",
-      description: "Schedule a new clinical appointment.",
-      role: "patient",
-      parameters: {
-        date: { type: "string", description: "The desired date in YYYY-MM-DD format.", required: true },
-        time: { type: "string", description: "The desired time in HH:MM format.", required: true },
-        reason: { type: "string", description: "Reason for the patient visit.", required: true }
-      },
-      samplePayload: { date: "2026-06-18", time: "10:30", reason: "Allergy follow-up" },
-      securityImpact: "Securely initiates a clinic visit slot for the current logged-in patient."
+      samplePayload: { appointmentId: "apt124", date: "2026-07-20", time: "10:30 AM" },
+      securityImpact: "Partial appointment update; logged in audit trail."
     },
     {
       name: "send_message",
-      description: "Send a clinical messaging log or conversational message to another user.",
+      description: "Send a secure message to another portal user. Accepts receiverId (e.g. patient31) or receiverName (e.g. Charles Xavier). Slug forms like charles_xavier are resolved automatically.",
       role: "all",
       parameters: {
-        receiverId: { type: "string", description: "The user ID of the recipient.", required: true },
-        content: { type: "string", description: "Text content of the message.", required: true }
+        receiverId: { type: "string", description: "Recipient user ID (preferred when known).", required: false },
+        receiverName: { type: "string", description: "Recipient display name when ID is unknown.", required: false },
+        content: { type: "string", description: "Message body text.", required: true }
       },
-      samplePayload: { receiverId: "doctor1", content: "Should I continue taking the Lisinopril before blood test?" },
-      securityImpact: "Encrypted patient-clinician messaging channel."
+      samplePayload: { receiverName: "Charles Xavier", content: "Hello, can you cover for me on August 5?" },
+      securityImpact: "Resolves display names to directory ids before POST; patient-to-patient messaging blocked by server policy."
+    },
+    {
+      name: "broadcast_message",
+      description: "Send the same message to every user with a given role (patient, nurse, doctor, or admin). Use for 'message all nurses' or 'notify all patients'. Excludes sender; patients cannot broadcast to patients.",
+      role: "nurse",
+      parameters: {
+        receiverRole: { type: "string", description: "Target role: patient, nurse, doctor, or admin.", required: true },
+        content: { type: "string", description: "Message text for each recipient.", required: true }
+      },
+      samplePayload: { receiverRole: "patient", content: "Hi, our office is closed July 3 & 4." },
+      securityImpact: "Available to nurses, doctors, and admins. One API call delivers to all eligible recipients."
+    },
+    {
+      name: "delete_messages",
+      description: "Delete messages from the user's mailbox by ID, or bulk-delete all messages from a sender (by user ID or display name).",
+      role: "all",
+      parameters: {
+        messageIds: { type: "array", description: "Explicit message IDs to delete.", required: false },
+        fromUserId: { type: "string", description: "Delete all messages from this sender.", required: false },
+        fromUserName: { type: "string", description: "Delete all messages from sender matched by name (e.g. Nurse Ratched).", required: false }
+      },
+      samplePayload: { fromUserName: "Nurse Ratched" },
+      securityImpact: "Only deletes messages the user sent or received; mirrors Messages panel bulk delete."
     },
     {
       name: "pay_bill",
-      description: "Mark a clinical billing invoice as fully paid by billing ID.",
+      description: "Mark a billing record as paid by billing ID.",
       role: "patient",
       parameters: {
-        billingId: { type: "string", description: "The ID of the billing record.", required: true }
+        billingId: { type: "string", description: "Billing record ID.", required: true }
       },
-      samplePayload: { billingId: "bill2" },
-      securityImpact: "PCI-DSS elements respected. Updates payment ledger in real-time."
+      samplePayload: { billingId: "bill_patient3_0" },
+      securityImpact: "Patients may only pay their own invoices; admins may pay any."
     },
     {
       name: "update_my_profile",
-      description: "Update your own profile details like realName, email, phone, address, SSN, Insurance ID, NPI, Ward, or Clinical Notes.",
+      description: "Update the logged-in user's profile: name, email, phone, address, SSN, insurance ID, NPI, ward, or clinical notes.",
       role: "all",
       parameters: {
         realName: { type: "string", description: "Full legal name.", required: false },
-        email: { type: "string", description: "Contact email address.", required: false },
-        phone: { type: "string", description: "Contact phone number.", required: false },
-        address: { type: "string", description: "Residential/practice address.", required: false },
-        ssn: { type: "string", description: "Patient Social Security Number.", required: false },
-        insurance_id: { type: "string", description: "Patient Insurance Group ID.", required: false },
-        npi_number: { type: "string", description: "Doctor National Provider Identifier (NPI).", required: false },
-        assigned_ward: { type: "string", description: "Nurse designated ward.", required: false },
-        clinical_notes: { type: "string", description: "Patient clinical history/treatment notes.", required: false }
+        email: { type: "string", description: "Contact email.", required: false },
+        phone: { type: "string", description: "Contact phone.", required: false },
+        address: { type: "string", description: "Address.", required: false },
+        ssn: { type: "string", description: "SSN (patients).", required: false },
+        insurance_id: { type: "string", description: "Insurance ID (patients).", required: false },
+        npi_number: { type: "string", description: "NPI (doctors).", required: false },
+        assigned_ward: { type: "string", description: "Ward (nurses).", required: false },
+        clinical_notes: { type: "string", description: "Clinical notes.", required: false }
       },
-      samplePayload: { realName: "John H. Watson", email: "john.watson@cisco.com", phone: "555-4321" },
-      securityImpact: "Triggers directory sync and logs the profile modification in the audit trail."
+      samplePayload: { phone: "559-297-4110" },
+      securityImpact: "Must be invoked before AI confirms profile changes; syncs patient record when role is patient."
     },
     {
       name: "change_my_password",
-      description: "Change user password securely by validating old password and saving new password.",
+      description: "Change password after validating the current password.",
       role: "all",
       parameters: {
-        oldPassword: { type: "string", description: "The current password.", required: true },
-        newPassword: { type: "string", description: "The new desired password.", required: true }
+        oldPassword: { type: "string", description: "Current password.", required: true },
+        newPassword: { type: "string", description: "New password.", required: true }
       },
-      samplePayload: { oldPassword: "Password123!", newPassword: "SecurePass2026!" },
-      securityImpact: "Strict credential validation; immediately resets active sessions and clears tokens."
+      samplePayload: { oldPassword: "L@bt3sting", newPassword: "SecurePass2026!" },
+      securityImpact: "Credential change via auth API; audited."
+    },
+    {
+      name: "get_ward_roster",
+      description: "Get the clinical patient roster with care-team assignments and triage flags.",
+      role: "nurse",
+      parameters: {},
+      samplePayload: {},
+      securityImpact: "Nurses should filter to assignedNurseId when user asks about 'my patients'."
+    },
+    {
+      name: "get_patient_vitals",
+      description: "Retrieve logged vitals (HR, BP, temperature) for a patient by ID.",
+      role: "nurse",
+      parameters: {
+        patientId: { type: "string", description: "Target patient ID.", required: true }
+      },
+      samplePayload: { patientId: "patient5" },
+      securityImpact: "Available to nurses, doctors, and admins."
+    },
+    {
+      name: "record_vitals",
+      description: "Record or update standard vitals for a patient.",
+      role: "nurse",
+      parameters: {
+        patientId: { type: "string", description: "Patient ID.", required: true },
+        hr: { type: "string", description: "Heart rate (bpm).", required: true },
+        temp: { type: "string", description: "Temperature (°F).", required: true },
+        bp: { type: "string", description: "Blood pressure (e.g. 120/80).", required: true }
+      },
+      samplePayload: { patientId: "patient2", hr: "72", temp: "98.4", bp: "118/75" },
+      securityImpact: "Clinical write; available to nurses, doctors, and admins."
+    },
+    {
+      name: "get_medication_tasks",
+      description: "List pending medication administration records (MAR) across the ward.",
+      role: "nurse",
+      parameters: {},
+      samplePayload: {},
+      securityImpact: "Nurse and admin roles only."
+    },
+    {
+      name: "update_medication_status",
+      description: "Mark a medication task as administered or pending.",
+      role: "nurse",
+      parameters: {
+        medId: { type: "string", description: "Medication task ID.", required: true },
+        status: { type: "string", description: "administered or pending.", required: true }
+      },
+      samplePayload: { medId: "med_patient5_0", status: "administered" },
+      securityImpact: "MAR workflow write; nurse and admin only."
     },
     {
       name: "update_patient_status",
-      description: "Update a patient's triaged clinical state.",
+      description: "Update a patient's clinical status (active, pending-triage, discharged, etc.).",
       role: "nurse",
       parameters: {
-        patientId: { type: "string", description: "The patient ID.", required: true },
-        status: { type: "string", description: "Desired status: 'active', 'pending-triage', 'discharged', 'under observation', or 'inactive'.", required: true }
+        patientId: { type: "string", description: "Patient ID.", required: true },
+        status: { type: "string", description: "Target status.", required: true }
       },
-      samplePayload: { patientId: "patient3", status: "discharged" },
-      securityImpact: "Requires professional clinical credentials; updates medical triage status directly."
+      samplePayload: { patientId: "patient3", status: "active" },
+      securityImpact: "Available to nurses, doctors, and admins."
     },
     {
-      name: "update_patient_details",
-      description: "Update a patient's clinical and demographic details, such as full name, phone, address, email, SSN, Insurance ID, status, and clinical notes. Accessible to doctors, nurses, and admins.",
-      role: "nurse",
+      name: "get_all_appointments",
+      description: "Retrieve appointments. Doctors default to their queue; nurses get full schedule (pass nurseId for own queue); admins get enriched list with care-team data.",
+      role: "doctor",
       parameters: {
-        patientId: { type: "string", description: "The ID of the target patient user.", required: true },
-        realName: { type: "string", description: "Updated full legal name.", required: false },
-        email: { type: "string", description: "Updated contact email address.", required: false },
-        phone: { type: "string", description: "Updated contact phone number.", required: false },
-        address: { type: "string", description: "Updated home address.", required: false },
-        ssn: { type: "string", description: "Updated Social Security Number.", required: false },
-        insurance_id: { type: "string", description: "Updated Insurance ID.", required: false },
-        clinical_notes: { type: "string", description: "Updated clinical assessment/history notes.", required: false },
-        status: { type: "string", description: "Updated clinical status.", required: false }
+        patientId: { type: "string", description: "Filter by patient.", required: false },
+        doctorId: { type: "string", description: "Filter by doctor.", required: false },
+        nurseId: { type: "string", description: "Filter by nurse.", required: false }
       },
-      samplePayload: { patientId: "patient3", phone: "555-8888", clinical_notes: "Condition stabilizing cleanly." },
-      securityImpact: "Allows rapid, multi-field synchronized modifications to clinical and directory registries."
+      samplePayload: { nurseId: "nurse5" },
+      securityImpact: "Doctor, nurse, and admin roles. Nurses have full CRUD on assigned appointments."
+    },
+    {
+      name: "get_billing_records",
+      description: "Query billing by patientId, doctorId, or nurseId. Doctors/nurses default to own clinician ID. AI-only for clinicians (no billing UI).",
+      role: "doctor",
+      parameters: {
+        patientId: { type: "string", description: "Filter by patient.", required: false },
+        doctorId: { type: "string", description: "Filter by doctor.", required: false },
+        nurseId: { type: "string", description: "Filter by nurse.", required: false }
+      },
+      samplePayload: { doctorId: "doctor1" },
+      securityImpact: "Admin, doctor, and nurse roles. Records include doctorName and nurseName."
+    },
+    {
+      name: "get_assigned_patient_deep_dive",
+      description: "Full patient chart: profile, medications, appointments, and lab results.",
+      role: "doctor",
+      parameters: {
+        patientId: { type: "string", description: "Patient ID.", required: true }
+      },
+      samplePayload: { patientId: "patient5" },
+      securityImpact: "Doctor and admin only; high PHI exposure."
+    },
+    {
+      name: "prescribe_medication",
+      description: "Add a new medication prescription for a patient.",
+      role: "doctor",
+      parameters: {
+        patientId: { type: "string", description: "Patient ID.", required: true },
+        name: { type: "string", description: "Drug name.", required: true },
+        dosage: { type: "string", description: "Dosage strength.", required: true },
+        frequency: { type: "string", description: "Dosing schedule.", required: true }
+      },
+      samplePayload: { patientId: "patient5", name: "Atorvastatin", dosage: "20mg", frequency: "once daily" },
+      securityImpact: "Doctor and admin only."
     },
     {
       name: "discontinue_medication",
-      description: "Deletes or discontinues medication prescriptions.",
+      description: "Discontinue a medication prescription by ID.",
       role: "doctor",
       parameters: {
-        medId: { type: "string", description: "ID of the medication prescription to discontinue.", required: true }
+        medId: { type: "string", description: "Medication ID.", required: true }
       },
-      samplePayload: { medId: "med3" },
-      securityImpact: "Direct override permission for patient prescriptions. Full logging in audit trail."
+      samplePayload: { medId: "med_patient5_0" },
+      securityImpact: "Doctor and admin only."
     },
     {
-      name: "create_user",
-      description: "Create a brand new portal user account with optional demographic & profile fields.",
-      role: "admin",
-      parameters: {
-        id: { type: "string", description: "Account username (unique).", required: true },
-        realName: { type: "string", description: "Full name of the user.", required: true },
-        role: { type: "string", description: "Account role: 'patient', 'doctor', 'nurse', or 'admin'.", required: true },
-        clearance_level: { type: "number", description: "Classification security clearance level (1 to 3).", required: false },
-        email: { type: "string", description: "Contact email address.", required: false },
-        phone: { type: "string", description: "Contact phone number.", required: false },
-        address: { type: "string", description: "Residential or home address.", required: false },
-        ssn: { type: "string", description: "Social Security Number (for patients).", required: false },
-        insurance_id: { type: "string", description: "Insurance ID (for patients).", required: false },
-        npi_number: { type: "string", description: "NPI Number (for doctors).", required: false },
-        assigned_ward: { type: "string", description: "Assigned ward (for nurses).", required: false },
-        clinical_notes: { type: "string", description: "Clinical treatment/diagnosis notes (for patients).", required: false },
-        internal_notes: { type: "string", description: "Administrative internal records.", required: false }
-      },
-      samplePayload: { id: "nurse_john", realName: "Johnathan Mercer", role: "nurse", clearance_level: 2, phone: "555-0101", assigned_ward: "Ward B" },
-      securityImpact: "Provisions directory access. Restrained by administrative authorization controls."
-    },
-    {
-      name: "delete_user",
-      description: "Completely deletes a patient or clinical staff user account.",
-      role: "admin",
-      parameters: {
-        userId: { type: "string", description: "User ID to merge out and delete.", required: true }
-      },
-      samplePayload: { userId: "nurse_john" },
-      securityImpact: "Destructive de-provisioning. Enforces last-admin survival interlocks."
-    },
-    {
-      name: "assign_patient_care_team",
-      description: "Designate care teams dynamically.",
-      role: "admin",
-      parameters: {
-        patientId: { type: "string", description: "Target patient ID.", required: true },
-        doctorId: { type: "string", description: "Doctor to assign to the patient.", required: false },
-        nurseId: { type: "string", description: "Nurse to assign to the patient.", required: false }
-      },
-      samplePayload: { patientId: "patient2", doctorId: "doctor1", nurseId: "nurse1" },
-      securityImpact: "Alters patient access rings. Audited via Cisco Identity Control framework."
-    },
-    {
-      name: "get_system_config",
-      description: "Inspect system integration configuration parameters.",
+      name: "get_clinicians",
+      description: "Directory of registered doctors and nurses (id and display name).",
       role: "admin",
       parameters: {},
       samplePayload: {},
-      securityImpact: "Exposes active clustering network topology coordinates."
+      securityImpact: "Admin, doctor, and nurse roles."
+    },
+    {
+      name: "query_audit_logs",
+      description: "Query security and activity audit logs.",
+      role: "admin",
+      parameters: {},
+      samplePayload: {},
+      securityImpact: "Admin only."
+    },
+    {
+      name: "get_user_directory",
+      description: "List all portal users and identity metadata.",
+      role: "admin",
+      parameters: {},
+      samplePayload: {},
+      securityImpact: "Admin only."
+    },
+    {
+      name: "manage_user_persona",
+      description: "Edit another user's profile, role, clearance level, and internal notes.",
+      role: "admin",
+      parameters: {
+        userId: { type: "string", description: "Target user ID.", required: true },
+        clearanceLevel: { type: "number", description: "Clearance 1–3.", required: false },
+        role: { type: "string", description: "admin, doctor, nurse, or patient.", required: false },
+        realName: { type: "string", description: "Full name.", required: false },
+        email: { type: "string", description: "Email.", required: false },
+        phone: { type: "string", description: "Phone.", required: false }
+      },
+      samplePayload: { userId: "nurse1", phone: "555-0199" },
+      securityImpact: "Admin identity management; fully audited."
+    },
+    {
+      name: "create_user",
+      description: "Provision a new portal user account.",
+      role: "admin",
+      parameters: {
+        id: { type: "string", description: "Unique username.", required: true },
+        realName: { type: "string", description: "Display name.", required: true },
+        role: { type: "string", description: "Account role.", required: true }
+      },
+      samplePayload: { id: "nurse11", realName: "Jane Smith", role: "nurse", assigned_ward: "Cardiac ICU" },
+      securityImpact: "Admin provisioning only."
+    },
+    {
+      name: "delete_user",
+      description: "Remove a user from the directory.",
+      role: "admin",
+      parameters: {
+        userId: { type: "string", description: "User ID to delete.", required: true }
+      },
+      samplePayload: { userId: "nurse11" },
+      securityImpact: "Destructive; admin only."
+    },
+    {
+      name: "assign_patient_care_team",
+      description: "Assign or change a patient's doctor and nurse.",
+      role: "admin",
+      parameters: {
+        patientId: { type: "string", description: "Patient ID.", required: true },
+        doctorId: { type: "string", description: "Doctor user ID.", required: false },
+        nurseId: { type: "string", description: "Nurse user ID.", required: false }
+      },
+      samplePayload: { patientId: "patient2", doctorId: "doctor1", nurseId: "nurse1" },
+      securityImpact: "Alters care-team mappings; admin only."
+    },
+    {
+      name: "get_infrastructure_topology",
+      description: "Return distributed deployment topology summary (appserver, dbserver, aibroker).",
+      role: "admin",
+      parameters: {},
+      samplePayload: {},
+      securityImpact: "Admin role; descriptive metadata only."
+    },
+    {
+      name: "emergency_system_reset",
+      description: "Factory reset database to seed defaults.",
+      role: "admin",
+      parameters: {},
+      samplePayload: {},
+      securityImpact: "Destructive; admin only."
+    },
+    {
+      name: "get_system_config",
+      description: "Read deployment mode and peer server URLs.",
+      role: "admin",
+      parameters: {},
+      samplePayload: {},
+      securityImpact: "Admin only."
     },
     {
       name: "update_system_config",
-      description: "Save/override active clustering settings.",
+      description: "Save standalone vs distributed mode and server URLs.",
       role: "admin",
       parameters: {
-        mode: { type: "string", description: "Deployment mode: 'standalone' or 'distributed'.", required: true },
-        appserverUrl: { type: "string", description: "IP or URL of Application Server.", required: false },
-        dbserverUrl: { type: "string", description: "IP or URL of Database Server.", required: false },
-        aibrokerUrl: { type: "string", description: "IP or URL of AI Broker.", required: false }
+        mode: { type: "string", description: "standalone or distributed.", required: true },
+        appserverUrl: { type: "string", description: "Application server URL.", required: false },
+        dbserverUrl: { type: "string", description: "Database server URL.", required: false },
+        aibrokerUrl: { type: "string", description: "AI broker URL.", required: false }
       },
-      samplePayload: { mode: "distributed", appserverUrl: "appserver.cisco.local", dbserverUrl: "dbserver.cisco.local" },
-      securityImpact: "Alters network routing and cluster identities immediately across all pods."
+      samplePayload: { mode: "distributed", appserverUrl: "https://appserver.example.com" },
+      securityImpact: "Admin infrastructure configuration."
     }
   ];
 
@@ -487,13 +480,13 @@ export default function Documentation({ user }: DocumentationProps) {
           </div>
           <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight">Vital Trust System Documentation</h2>
           <p className="text-white/80 text-sm md:text-base leading-relaxed">
-            Welcome to the Vital Trust Reference and Compliance center. Explore the official Model Context Protocol (MCP) server endpoints, security-hardened topologies, integrated security controls, and full attack-defense mitigation definitions.
+            Welcome to the Vital Trust reference center. Browse the Model Context Protocol (MCP) server tool registry and integrated Cisco security control hooks configured in Settings.
           </p>
         </div>
       </div>
 
-      {/* Grid Tabs selection */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 border-b border-slate-200 pb-2">
+      {/* Sub-tabs */}
+      <div className="grid grid-cols-2 gap-2 border-b border-slate-200 pb-2 max-w-xl">
         <button 
           onClick={() => setActiveSubTab('mcp')}
           className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${
@@ -505,16 +498,6 @@ export default function Documentation({ user }: DocumentationProps) {
           <Cpu size={16} /> MCP Server API
         </button>
         <button 
-          onClick={() => setActiveSubTab('architecture')}
-          className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${
-            activeSubTab === 'architecture' 
-              ? 'bg-epic-blue text-white shadow-md shadow-epic-blue/10 border border-epic-blue' 
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent'
-          }`}
-        >
-          <Server size={16} /> Grid Topology
-        </button>
-        <button 
           onClick={() => setActiveSubTab('integrations')}
           className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${
             activeSubTab === 'integrations' 
@@ -523,16 +506,6 @@ export default function Documentation({ user }: DocumentationProps) {
           }`}
         >
           <Settings size={16} /> Security Controls
-        </button>
-        <button 
-          onClick={() => setActiveSubTab('security_matrix')}
-          className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${
-            activeSubTab === 'security_matrix' 
-              ? 'bg-epic-blue text-white shadow-md shadow-epic-blue/10 border border-epic-blue' 
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-transparent'
-          }`}
-        >
-          <UserCheck size={16} /> Attack vs Defense
         </button>
       </div>
 
@@ -547,7 +520,7 @@ export default function Documentation({ user }: DocumentationProps) {
                   MCP API Tool Registry Specifications
                 </h3>
                 <p className="text-slate-500 text-xs mt-1">
-                  We register a full suite of 35 analytical tools utilizing the Model Context Protocol (MCP) framework pattern. The AI broker invokes these endpoints based on user credentials.
+                  {mcpTools.length} MCP tools registered. The AI broker exposes only the tools allowed for the logged-in role (see <code className="font-mono text-slate-600">server-mcp-tools.ts</code>).
                 </p>
               </div>
               <div className="inline-flex items-center bg-emerald-50 text-emerald-800 border border-emerald-100 px-3 py-1.5 rounded-xl text-[11px] font-bold">
@@ -707,138 +680,6 @@ export default function Documentation({ user }: DocumentationProps) {
           </div>
         )}
 
-        {/* Distributed Architecture View */}
-        {activeSubTab === 'architecture' && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-6">
-              <div>
-                <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                  <Server className="text-epic-blue" size={20} />
-                  Triple-Server Isolation Architecture (Node Topology)
-                </h3>
-                <p className="text-slate-500 text-xs mt-1">
-                  Vital Trust simulates an industrial segmented multi-cloud health record mesh split into three individual isolated microservices with Zero-Trust network boundaries:
-                </p>
-              </div>
-
-              {/* Graphic container styled with modern CSS cards */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-4 relative">
-                
-                {/* server 1 */}
-                <div className="clinical-card border-slate-200 hover:border-epic-blue transition-all group flex flex-col justify-between">
-                  <div className="p-6 space-y-4">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-epic-blue group-hover:bg-epic-light/60 transition-colors">
-                      <Server size={24} />
-                    </div>
-                    <div>
-                      <span className="text-[10px] bg-sky-50 text-sky-700 py-0.5 px-2 rounded-md font-bold uppercase">Public Zone</span>
-                      <h4 className="text-md font-bold text-slate-900 mt-1 font-mono">appserver (Application Server & Reverse Proxy)</h4>
-                    </div>
-                    <p className="text-slate-500 text-xs leading-relaxed">
-                      Accepts public external incoming internet requests over port <span className="font-mono text-emerald-600 font-bold">3000</span>. Coordinates local and OIDC authentications, acts as the static frontend bundle host, and handles initial reverse proxy routing.
-                    </p>
-                  </div>
-                  <div className="bg-slate-50 p-4 border-t border-slate-100 flex justify-between text-[11px] font-mono text-slate-500">
-                    <span>ZTNA Posture: Checked</span>
-                    <span className="text-slate-800 font-bold">Port 3000</span>
-                  </div>
-                </div>
-
-                {/* server 2 */}
-                <div className="clinical-card border-slate-200 hover:border-emerald-600 transition-all group flex flex-col justify-between relative">
-                  <div className="absolute top-4 right-4 text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-md px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest">
-                    ZTNA Isolated
-                  </div>
-                  <div className="p-6 space-y-4">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-50 transition-colors">
-                      <Database size={24} />
-                    </div>
-                    <div>
-                      <span className="text-[10px] bg-emerald-50 text-emerald-700 py-0.5 px-2 rounded-md font-bold uppercase">Protected DB Tier</span>
-                      <h4 className="text-md font-bold text-slate-900 mt-1 font-mono">dbserver (Database Server)</h4>
-                    </div>
-                    <p className="text-slate-500 text-xs leading-relaxed">
-                      Stores the raw Electronic Health Records (EHR) database (patients, SSNs, medical checks). Isolated in the private enclave. Unreachable from the outside. Only allows specific HTTP/REST endpoints initiated by the AI broker or proxy.
-                    </p>
-                  </div>
-                  <div className="bg-slate-50 p-4 border-t border-slate-100 flex justify-between text-[11px] font-mono text-slate-500">
-                    <span>Micro-seg: Active</span>
-                    <span className="text-emerald-700 font-bold">Port Isolated</span>
-                  </div>
-                </div>
-
-                {/* server 3 */}
-                <div className="clinical-card border-slate-200 hover:border-epic-dark transition-all group flex flex-col justify-between">
-                  <div className="p-6 space-y-4">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-epic-dark group-hover:bg-slate-100 transition-colors">
-                      <Cpu size={24} />
-                    </div>
-                    <div>
-                      <span className="text-[10px] bg-indigo-50 text-indigo-700 py-0.5 px-2 rounded-md font-bold uppercase">Security Enforcer</span>
-                      <h4 className="text-md font-bold text-slate-900 mt-1 font-mono">aibroker (AI Broker / Guard)</h4>
-                    </div>
-                    <p className="text-slate-500 text-xs leading-relaxed">
-                      Orchestrates all AI LLM requests. Applies real-time Cisco AI Defense regulations on prompt injections and PII scanner patterns. Formats and enforces the role boundary constraints before calling MCP service pathways.
-                    </p>
-                  </div>
-                  <div className="bg-slate-50 p-4 border-t border-slate-100 flex justify-between text-[11px] font-mono text-slate-500">
-                    <span>AI Scanners: Active</span>
-                    <span className="text-indigo-700 font-bold">AES-256</span>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Graphical CSS-based request routing chart */}
-              <div className="mt-8 bg-slate-50 p-6 rounded-2xl border border-slate-200/60">
-                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-tighter mb-4">Internal Transaction & Secure Proxy Workflow Diagram</h4>
-                <div className="flex flex-col md:flex-row items-center justify-between gap-4 max-w-4xl mx-auto py-6">
-                  
-                  {/* client */}
-                  <div className="flex-1 w-full bg-white p-4 rounded-xl border border-slate-200 flex flex-col items-center">
-                    <User className="text-epic-blue mb-1" size={18} />
-                    <span className="text-xs font-bold">Voter / User</span>
-                    <span className="text-[9px] text-slate-400 font-mono">Client Browser</span>
-                  </div>
-
-                  <ArrowRight className="text-slate-400 rotate-90 md:rotate-0" size={16} />
-
-                  {/* reverse proxy appserver */}
-                  <div className="flex-1 w-full bg-white p-4 rounded-xl border border-slate-200 flex flex-col items-center relative">
-                    <div className="absolute top-1 right-2 w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-                    <Server className="text-epic-blue mb-1" size={18} />
-                    <span className="text-xs font-bold leading-tight text-center">appserver (Application Server)</span>
-                    <span className="text-[9px] text-slate-400 font-mono">MFA / URL Filtering</span>
-                  </div>
-
-                  <ArrowRight className="text-slate-400 rotate-90 md:rotate-0" size={16} />
-
-                  {/* ai-broker aibroker */}
-                  <div className="flex-1 w-full bg-white p-4 rounded-xl border border-slate-200 flex flex-col items-center relative [border-image:linear-gradient(to_right,rgba(0,188,235,1),indigo)_1]">
-                    <Cpu className="text-indigo-600 mb-1" size={18} />
-                    <span className="text-xs font-bold leading-tight text-center">aibroker (AI-Broker Guard)</span>
-                    <span className="text-[9px] text-indigo-500 font-bold uppercase tracking-widest text-[8px]">AI Defense Enforced</span>
-                  </div>
-
-                  <ArrowRight className="text-slate-400 rotate-90 md:rotate-0" size={16} />
-
-                  {/* dbserver dbserver */}
-                  <div className="flex-1 w-full bg-slate-900 p-4 rounded-xl text-white flex flex-col items-center border border-emerald-500">
-                    <Database className="text-emerald-400 mb-1" size={18} />
-                    <span className="text-xs font-bold leading-tight text-center">dbserver (Database Server / MCP)</span>
-                    <span className="text-[9px] text-emerald-400 font-mono">Protected PHI Storage</span>
-                  </div>
-
-                </div>
-                <div className="bg-white p-3.5 rounded-xl border border-slate-200 mt-2 text-xs leading-relaxed text-slate-500">
-                  <span className="font-bold text-slate-900 border-r border-slate-300 pr-2 mr-2">Policy Hook</span>
-                  When a request to fetch patient charts is triggered, the AI-Broker is securely proxied over isolated, micro-segmented channels. Cisco Secure Workload denies direct raw queries to the database from anything other than highly credentialed servers.
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Cisco integrations Security Controls details */}
         {activeSubTab === 'integrations' && (
           <div className="space-y-6">
@@ -924,74 +765,6 @@ export default function Documentation({ user }: DocumentationProps) {
                 </div>
               </div>
 
-            </div>
-          </div>
-        )}
-
-        {/* Attack vs Defense security matrix */}
-        {activeSubTab === 'security_matrix' && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm overflow-hidden space-y-4">
-              <div>
-                <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                  <AlertTriangle className="text-amber-600" />
-                  Attack vs. Cisco Secure Defense Mitigation Matrix
-                </h3>
-                <p className="text-slate-500 text-xs mt-1">
-                  How the Vital Trust application handles potential threats, malicious vectors, and logical leaks across clinical workflows:
-                </p>
-              </div>
-
-              <div className="overflow-x-auto pt-2">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest w-1/4">Threat / Attack Vector</th>
-                      <th className="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest w-1/4">Potential Medical Impact</th>
-                      <th className="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest w-1/4">Cisco Portfolio Mitigation</th>
-                      <th className="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest w-1/4">HIPAA Compliance Outcome</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                    <tr className="hover:bg-slate-50/50">
-                      <td className="px-5 py-4 font-bold text-slate-900">Clinician session hijack to inspect Patient Charts (SSN/InsurID)</td>
-                      <td className="px-5 py-4 text-slate-500">Severe privacy leak of raw PHI records and billing details.</td>
-                      <td className="px-5 py-4 bg-red-50/30 text-red-800">
-                        <span className="font-bold flex items-center gap-1"><Lock size={12} /> Cisco Duo Step-Up MFA</span>
-                        Demands instant second-factor authorization on the doctor's phone before decoding Chart views.
-                      </td>
-                      <td className="px-5 py-4 text-emerald-700 font-bold">100% HIPAA Compliant. Fully logged.</td>
-                    </tr>
-                    <tr className="hover:bg-slate-50/50">
-                      <td className="px-5 py-4 font-bold text-slate-900">Jailbreak / Prompt Injection targeting LLM assistant</td>
-                      <td className="px-5 py-4 text-slate-500">Could trick the LLM helper to dump global configurations or other patients' charts.</td>
-                      <td className="px-5 py-4 bg-indigo-50/30 text-indigo-900">
-                        <span className="font-bold flex items-center gap-1"><Cpu size={12} /> Cisco AI Defense & Sandbox</span>
-                        Analyzes incoming prompts, drops compromised payloads, and strips/PII-redacts clinical details of other patients.
-                      </td>
-                      <td className="px-5 py-4 text-emerald-700 font-bold">Prevents rogue exfiltrations. Active guard.</td>
-                    </tr>
-                    <tr className="hover:bg-slate-50/50">
-                      <td className="px-5 py-4 font-bold text-slate-900">Compromised guest router or hospital tablet brute force</td>
-                      <td className="px-5 py-4 text-slate-500">Port traversal, network sniffing, and direct DB database connection compromise.</td>
-                      <td className="px-5 py-4 bg-sky-50/30 text-sky-900">
-                        <span className="font-bold flex items-center gap-1"><Shield size={12} /> Cisco Secure Access ZTNA</span>
-                        Enforces device security postures and geolocation controls. Blocks access without active corporate credentials.
-                      </td>
-                      <td className="px-5 py-4 text-emerald-700 font-bold">Locks out unauthorized endpoints completely.</td>
-                    </tr>
-                    <tr className="hover:bg-slate-50/50">
-                      <td className="px-5 py-4 font-bold text-slate-900">Lateral hop from compromised appserver to database</td>
-                      <td className="px-5 py-4 text-slate-500">Unauthorized read/writes, tampering with critical diagnosis or vitals on dbserver.</td>
-                      <td className="px-5 py-4 bg-emerald-50/30 text-emerald-900">
-                        <span className="font-bold flex items-center gap-1"><Database size={12} /> Cisco Secure Workload (CSW)</span>
-                        Microsegmentation. Only accepts port 3000 HTTP/TLS endpoints from the validated broker context. All lateral connections block.
-                      </td>
-                      <td className="px-5 py-4 text-emerald-700 font-bold">Ensures multi-tier network logical division.</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
             </div>
           </div>
         )}

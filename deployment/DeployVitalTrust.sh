@@ -33,11 +33,21 @@ if [ ! -f "$DOCKER_FILE" ] && [ -f "Dockerfile" ]; then
     DOCKER_FILE="Dockerfile"
 fi
 
-# Safely reset local development database cache before new container build to guarantee clean clinical blueprint state
-if [ -f "persistent_db.json" ]; then
-    echo "[INFO] Removing cached persistent_db.json on host to ensure a fresh factory-reset database on new deployment."
-    rm -f "persistent_db.json"
-fi
+# Safely reset local database/runtime cache before new container build (fresh seed from INITIAL_DB)
+reset_db_artifact() {
+  if [ -f "$1" ]; then
+    echo "[INFO] Removing stale $1"
+    rm -f "$1"
+  fi
+}
+
+for artifact in "persistent_db.json" "deployment_config.json" "system_console.log"; do
+  reset_db_artifact "$(pwd)/$artifact"
+done
+
+# Common host paths when refreshing from /tmp/vitaltrust or a persistent checkout
+reset_db_artifact "/home/ubuntu/vitaltrust/persistent_db.json"
+reset_db_artifact "/tmp/vitaltrust/persistent_db.json"
 
 echo "[1/3] Building VitalTrust Docker Image..."
 docker build -t vitaltrust-app -f "$DOCKER_FILE" .

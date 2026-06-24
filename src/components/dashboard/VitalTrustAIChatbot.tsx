@@ -48,6 +48,15 @@ ${examples}
 * "Tell me how AI works in a few of paragraphs."`;
 };
 
+function clearAllAiChatHistory() {
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith('vt_ai_chat_')) keysToRemove.push(key);
+  }
+  keysToRemove.forEach((key) => localStorage.removeItem(key));
+}
+
 export default function VitalTrustAIChatbot({ user }: { user: User; key?: string }) {
   // Load configuration from localStorage
   const [selectedModel, setSelectedModel] = useState<string>('OpenAI GPT-5');
@@ -73,9 +82,10 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
 
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [chatBootSynced, setChatBootSynced] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Load initially on mount
+  // Load initially on mount — sync boot id so redeploys clear stale browser chat history
   useEffect(() => {
     setSelectedModel(localStorage.getItem('vt_ai_selected_model') || 'OpenAI GPT-5');
     setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
@@ -96,9 +106,21 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
             openaiAvailable: !!data.openaiAvailable,
             activeProvider: data.activeProvider || 'local'
           });
+          const bootId = data.bootInstanceId as string | undefined;
+          if (bootId) {
+            const storedBootId = localStorage.getItem('vt_boot_instance_id');
+            if (storedBootId !== bootId) {
+              clearAllAiChatHistory();
+              localStorage.setItem('vt_boot_instance_id', bootId);
+            }
+          }
         }
+        setChatBootSynced(true);
       })
-      .catch(err => console.error('Error fetching server config:', err));
+      .catch(err => {
+        console.error('Error fetching server config:', err);
+        setChatBootSynced(true);
+      });
   }, []);
 
   useEffect(() => {
@@ -118,6 +140,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
 
   // Synchronize and load/reload the correct message stream whenever the authenticated user ID switches
   useEffect(() => {
+    if (!chatBootSynced) return;
     try {
       const stored = localStorage.getItem(`vt_ai_chat_${user.id}`);
       if (stored) {
@@ -133,7 +156,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
     } catch (e) {
       console.error('Error loading chat history from localStorage:', e);
     }
-  }, [user.id, user.realName]);
+  }, [user.id, user.realName, chatBootSynced]);
 
   // Keep a ref of the loaded active user to prevent leakage of stale state during unmount/transition periods
   const prevUserId = useRef(user.id);

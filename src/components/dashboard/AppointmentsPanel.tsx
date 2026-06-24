@@ -65,8 +65,8 @@ export default function AppointmentsPanel({ user }: AppointmentsPanelProps) {
       const [apts, pats, docList, nurseList] = await Promise.all([
         api.getAppointments(params),
         isClinicalStaff || isPatient ? api.getPatients() : Promise.resolve([]),
-        isClinicalStaff ? api.getDoctors() : Promise.resolve([]),
-        isClinicalStaff ? api.getNurses() : Promise.resolve([]),
+        api.getDoctors(),
+        api.getNurses(),
       ]);
       setAppointments(apts);
       setPatients(pats);

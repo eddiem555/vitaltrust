@@ -1,33 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FileText, Calendar, CreditCard, ShieldCheck, X, CheckCircle2 } from 'lucide-react';
+import { FileText, Calendar, ShieldCheck, X, CheckCircle2 } from 'lucide-react';
 import MessagesPanel from './MessagesPanel';
 import AppointmentsPanel from './AppointmentsPanel';
+import BillingPanel from './BillingPanel';
 import VitalTrustAIChatbot from './VitalTrustAIChatbot';
 import AISettings from './AISettings';
 import AuditLogs from './AuditLogs';
-import { User, Medication, BillingRecord, Patient } from '../../types';
+import { User, Medication, Patient } from '../../types';
 import { api } from '../../services/api';
 
 export default function PatientDashboard({ tab, user }: { tab: string, user: User }) {
   const [activeView, setActiveView] = useState<string | null>(null);
   const [patientProfile, setPatientProfile] = useState<Patient | null>(null);
   const [medications, setMedications] = useState<Medication[]>([]);
-  const [billing, setBilling] = useState<BillingRecord[]>([]);
   const [labResults, setLabResults] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [profile, meds, bills, labs] = await Promise.all([
+        const [profile, meds, labs] = await Promise.all([
           api.getPatient(user.id),
           api.getMedications(user.id),
-          api.getBilling(user.id),
           api.getLabResults(user.id)
         ]);
         setPatientProfile(profile);
         setMedications(meds);
-        setBilling(bills);
         setLabResults(labs);
       } catch (err) {
         console.error("Failed to fetch clinical data", err);
@@ -56,6 +54,10 @@ export default function PatientDashboard({ tab, user }: { tab: string, user: Use
     return <AppointmentsPanel user={user} />;
   }
 
+  if (tab === 'billing') {
+    return <BillingPanel user={user} />;
+  }
+
   return (
     <div className="space-y-8">
       {/* Welcome Banner */}
@@ -81,7 +83,6 @@ export default function PatientDashboard({ tab, user }: { tab: string, user: Use
                {[
                  { id: 'records', label: 'Lab Results', desc: labResults.length > 0 ? `View ${labResults.length} test results` : 'No results found', icon: <FileText className="text-red-600" />, iconBg: 'bg-red-50' },
                  { id: 'medications', label: 'Medications', desc: `${medications.length} active prescriptions`, icon: <Calendar className="text-indigo-600" />, iconBg: 'bg-indigo-50' },
-                 { id: 'billing', label: 'Billing', desc: `Balance: $${billing.reduce((acc, b) => b.status !== 'paid' ? acc + b.amount : acc, 0).toFixed(2)}`, icon: <CreditCard className="text-amber-600" />, iconBg: 'bg-amber-50' },
                ].map((card) => (
                  <div 
                    key={card.id}
@@ -160,27 +161,6 @@ export default function PatientDashboard({ tab, user }: { tab: string, user: Use
                              <p className="text-sm font-medium text-slate-500">No lab results available for this patient.</p>
                           </div>
                       )}
-                  </div>
-              </Modal>
-          )}
-
-          {activeView === 'billing' && (
-              <Modal title="Billing History" onClose={() => setActiveView(null)}>
-                  <div className="p-6 space-y-4">
-                      {billing.map(bill => (
-                          <div key={bill.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-100">
-                              <div>
-                                  <p className="font-bold text-slate-900 text-sm">{bill.description}</p>
-                                  <p className="text-[10px] text-slate-500 uppercase font-bold">{bill.date}</p>
-                              </div>
-                              <div className="text-right">
-                                  <p className="font-bold text-slate-900">${bill.amount.toFixed(2)}</p>
-                                  <span className={`text-[10px] font-bold uppercase ${bill.status === 'paid' ? 'text-green-600' : 'text-amber-600'}`}>
-                                      {bill.status}
-                                  </span>
-                              </div>
-                          </div>
-                      ))}
                   </div>
               </Modal>
           )}

@@ -58,6 +58,10 @@ export interface BillingRecord {
   description: string;
   amount: number;
   status: 'paid' | 'unpaid' | 'pending';
+  doctorId?: string;
+  doctorName?: string;
+  nurseId?: string;
+  nurseName?: string;
 }
 
 export interface Medication {

@@ -1,6 +1,7 @@
 // VitalTrust Mock Database — unified seed (50 patients, externalized appointments & messages)
 import { INITIAL_APPOINTMENTS } from './appointments';
 import { INITIAL_MESSAGES } from './messages';
+import { INITIAL_BILLING } from './billing';
 import { careTeamForPatientIndex } from './appointments';
 
 export const DEFAULT_PASSWORD = 'L@bt3sting';
@@ -14,8 +15,6 @@ const DRUG_NAMES = ['Amlodipine', 'Metformin', 'Lisinopril', 'Atorvastatin', 'Le
 const DOSAGES = ['5mg', '10mg', '20mg', '40mg', '50mg', '100mg', '500mg'];
 const LAB_TESTS = ['Complete Blood Count', 'Lipid Panel', 'HbA1c', 'Metabolic Panel', 'Imaging'];
 const LAB_RESULTS = ['Normal', 'Stable', 'Borderline', 'Requires Review'];
-const BILL_DESC = ['Consultation Fee', 'Lab Processing', 'Administrative Fee', 'Pharmacy Component'];
-const BILL_STATUS = ['paid', 'unpaid', 'pending'] as const;
 
 function getMedsForCondition(condition: string): string[] {
   switch (condition) {
@@ -197,24 +196,6 @@ function buildLabResults() {
   return labs;
 }
 
-function buildBilling() {
-  const bills: Array<{ id: string; patientId: string; date: string; description: string; amount: number; status: typeof BILL_STATUS[number] }> = [];
-  for (let i = 1; i <= 50; i++) {
-    const count = i % 11;
-    for (let j = 0; j < count; j++) {
-      bills.push({
-        id: `bill_patient${i}_${j}`,
-        patientId: `patient${i}`,
-        date: `2026-06-${String(10 + ((i + j) % 20)).padStart(2, '0')}`,
-        description: BILL_DESC[(i + j) % BILL_DESC.length],
-        amount: 50 + ((i * 17 + j * 23) % 250),
-        status: BILL_STATUS[(i + j) % BILL_STATUS.length],
-      });
-    }
-  }
-  return bills;
-}
-
 function buildMedicationsDetailed() {
   const meds: Array<{ id: string; patientId: string; name: string; dosage: string; frequency: string; startDate: string; status: string }> = [];
   for (let i = 1; i <= 50; i++) {
@@ -241,7 +222,7 @@ export const INITIAL_DB = {
   doctors: buildDoctors(),
   appointments: INITIAL_APPOINTMENTS,
   lab_results: buildLabResults(),
-  billing: buildBilling(),
+  billing: INITIAL_BILLING,
   medications_detailed: buildMedicationsDetailed(),
   messages: INITIAL_MESSAGES,
   logs: [
