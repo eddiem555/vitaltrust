@@ -2934,7 +2934,7 @@ async function startServer() {
         },
         cancel_appointment: {
           name: "cancel_appointment",
-          description: "Delete or cancel a scheduled appointment by ID. Patients may cancel their own visits; doctors and nurses may cancel appointments they are assigned to; administrators may cancel any appointment.",
+          description: "Delete or cancel one scheduled appointment by ID. Patients may cancel their own visits; doctors and nurses may cancel appointments they are assigned to; administrators may cancel any appointment. For multiple appointments on a date, prefer cancel_appointments_by_date.",
           parameters: {
             type: "object",
             properties: {
@@ -2945,7 +2945,7 @@ async function startServer() {
         },
         reschedule_appointment: {
           name: "reschedule_appointment",
-          description: "Reschedule an existing appointment to a new date and time. Same authorization rules as cancel_appointment.",
+          description: "Reschedule one appointment by ID to a new date and time. Same authorization rules as cancel_appointment. For multiple appointments on a date, prefer reschedule_appointments_by_date.",
           parameters: {
             type: "object",
             properties: {
@@ -2954,6 +2954,29 @@ async function startServer() {
               time: { type: "string", description: "The desired time in HH:MM format." }
             },
             required: ["appointmentId", "date", "time"]
+          }
+        },
+        cancel_appointments_by_date: {
+          name: "cancel_appointments_by_date",
+          description: "Cancel ALL appointments on a given date that the logged-in user is authorized to modify (matches Appointments panel bulk delete). Use for requests like 'cancel all my appointments on August 8'. Date accepts YYYY-MM-DD or natural language (e.g. August 9).",
+          parameters: {
+            type: "object",
+            properties: {
+              date: { type: "string", description: "The calendar date to cancel appointments on (YYYY-MM-DD or natural language)." }
+            },
+            required: ["date"]
+          }
+        },
+        reschedule_appointments_by_date: {
+          name: "reschedule_appointments_by_date",
+          description: "Move ALL appointments from one date to another, preserving each appointment's time. Use for requests like 'move all appointments from August 9 to August 17'. Same authorization rules as cancel_appointment.",
+          parameters: {
+            type: "object",
+            properties: {
+              sourceDate: { type: "string", description: "Current date of appointments to move (YYYY-MM-DD or natural language)." },
+              targetDate: { type: "string", description: "New date for those appointments (YYYY-MM-DD or natural language)." }
+            },
+            required: ["sourceDate", "targetDate"]
           }
         },
         update_appointment: {
@@ -3343,7 +3366,7 @@ async function startServer() {
 
       const mcpCapabilitiesByRole: Record<string, string> = {
         admin: `Your MCP tools include full enterprise access: user directory, audit logs, system configuration, care-team assignment, billing queries (get_billing_records), messaging, and all clinical records (patients, appointments, medications, vitals). Prefer get_all_appointments for schedule reporting, get_ward_roster for patient-to-clinician mappings, and get_clinicians for staff lookups.`,
-        doctor: `Your MCP tools support clinical workflows: ward roster, assigned patient charts (get_assigned_patient_deep_dive), your appointment queue (get_all_appointments), vitals, prescribing, patient status updates, messaging, and billing queries for your clinician ID (get_billing_records).`,
+        doctor: `Your MCP tools support clinical workflows: ward roster, assigned patient charts (get_assigned_patient_deep_dive), your appointment queue (get_all_appointments), vitals, prescribing, patient status updates, messaging, and billing queries for your clinician ID (get_billing_records). To cancel or move appointments you MUST call cancel_appointment, reschedule_appointment, cancel_appointments_by_date, or reschedule_appointments_by_date — never claim success after only reading the schedule.`,
         nurse: `Your MCP tools support bedside workflows: ward roster, patient vitals, medication administration tasks (MAR), patient status updates, messaging (send_message for one recipient, broadcast_message for all users in a role), billing queries (get_billing_records), and full appointment management for visits where you are the assigned nurse.`,
         patient: `Your MCP tools expose your own health record: profile, medications, appointments, lab results, billing, and messages. Use update_my_profile for profile changes, delete_messages to remove messages, send_message to compose, and create_appointment to schedule visits.`
       };
@@ -3364,6 +3387,11 @@ Critical mutation rules (create / update / delete):
 - Profile updates: call update_my_profile with explicit fields (e.g. phone: "555-123-4567").
 - Message deletion: call get_my_messages first if needed, then delete_messages with messageIds or fromUserName/fromUserId.
 - Role broadcasts ("message all nurses/patients/doctors"): call broadcast_message with receiverRole and content — do not loop send_message manually.
+- Appointment changes: get_all_appointments / get_my_appointments are read-only discovery. To cancel or reschedule you MUST call a write tool and wait for its success response:
+  • "cancel all appointments on [date]" → cancel_appointments_by_date (date as YYYY-MM-DD; convert "August 8" → "2026-08-08")
+  • "move all appointments from [date A] to [date B]" → reschedule_appointments_by_date (preserves times)
+  • Single appointment → cancel_appointment or reschedule_appointment with appointmentId from the list
+  Never tell the user appointments were changed if you only called a read tool.
 - After a successful update_my_profile, you may summarize what changed based on the tool response only.
 
 ${roleMcpGuidance}
@@ -3380,7 +3408,7 @@ MCP tool scoping for self-references (when using tools, not for refusing other q
 4. Administrator (role: "admin"): do not filter clinical data to a single user unless explicitly asked — system-wide visibility.
 
 Appointment MCP notes:
-- Doctors: get_all_appointments returns their queue by default (pass doctorId to query others).
+- Doctors: get_all_appointments returns their queue by default (pass doctorId to query others). Use cancel_appointments_by_date / reschedule_appointments_by_date for bulk day-level changes.
 - Nurses: get_all_appointments returns the full schedule (pass nurseId "${uId}" for only their assigned visits). Create/update/cancel/reschedule only on appointments where nurseId equals "${uId}".
 - Administrators: get_all_appointments returns all appointments with care-team assignments.
 - Patients: view via get_my_appointments; create/update/cancel/reschedule only their own visits.
@@ -3442,7 +3470,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
         const routeLabel = useProxy ? "Cisco AI Defense Gateway" : "Google Gemini API";
         console.log(`[AI_BROKER] [GEMINI] Calling ${routeLabel} with model "${modelId}"`);
 
-        let loopLimit = 5;
+        let loopLimit = 12;
         let replyText = "";
         const currentContents = JSON.parse(JSON.stringify(contents));
 
@@ -3551,7 +3579,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             };
           });
 
-          let loopLimit = 5;
+          let loopLimit = 12;
           let replyMessage: any = null;
 
           while (loopLimit > 0) {
@@ -3676,7 +3704,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             };
           });
 
-          let loopLimit = 5;
+          let loopLimit = 12;
           let replyMessage: any = null;
 
           while (loopLimit > 0) {

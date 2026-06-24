@@ -15,7 +15,7 @@ This document lists CRUD capabilities exposed in the **web portal** by role, and
 | Clinical summary | — | ✅ | — | — | My Care Plan | `get_my_clinical_summary` | ✅ |
 | Medications | — | ✅ | — | — | My Care Plan modal | `get_my_medications` | ✅ (read-only both) |
 | Lab results | — | ✅ | — | — | My Care Plan modal | `get_my_lab_results` | ✅ |
-| Appointments | ✅ | ✅ | ✅ | ✅ | Appointments | `get_my_appointments`, `create_appointment`, `reschedule_appointment`, `cancel_appointment` | ✅ |
+| Appointments | ✅ | ✅ | ✅ | ✅ | Appointments | `get_my_appointments`, `create_appointment`, `update_appointment`, `reschedule_appointment`, `cancel_appointment`, `cancel_appointments_by_date`, `reschedule_appointments_by_date` | ✅ |
 | Messages | ✅ | ✅ | — | ✅ | Messages | `get_my_messages`, `send_message`, `delete_messages` | ✅ |
 | Billing | — | ✅ | — | — | Billing (nav) | `get_my_billing`, `pay_bill` | ✅ |
 
@@ -29,7 +29,7 @@ This document lists CRUD capabilities exposed in the **web portal** by role, and
 | Patient vitals | — | ✅ | ✅ | — | Patient detail | `get_patient_vitals`, `record_vitals` | ✅ |
 | Patient status | — | — | ✅ | — | Patient detail | `update_patient_status` | ✅ |
 | Medications | ✅ | ✅ | — | ✅ | Patient detail | `prescribe_medication`, `discontinue_medication` | ✅ |
-| Appointments (assigned) | ✅ | ✅ | ✅ | ✅ | Appointments | `get_all_appointments`, `create_appointment`, `update_appointment`, `cancel_appointment`, `reschedule_appointment` | ✅ |
+| Appointments (assigned) | ✅ | ✅ | ✅ | ✅ | Appointments | `get_all_appointments`, `create_appointment`, `update_appointment`, `cancel_appointment`, `reschedule_appointment`, `cancel_appointments_by_date`, `reschedule_appointments_by_date` | ✅ |
 | Messages | ✅ | ✅ | — | ✅ | Messages | `get_my_messages`, `send_message`, `broadcast_message`, `delete_messages` | ✅ |
 | Billing (by clinician) | — | — | — | — | *AI only* | `get_billing_records` | 🔧 |
 | Own profile / password | — | ✅ | ✅ | — | Profile modal | `update_my_profile`, `change_my_password` | ✅ |
@@ -44,7 +44,7 @@ This document lists CRUD capabilities exposed in the **web portal** by role, and
 | Patient vitals | — | ✅ | ✅ | — | Patient detail | `get_patient_vitals`, `record_vitals` | ✅ |
 | Patient status | — | — | ✅ | — | Patient detail | `update_patient_status` | ✅ |
 | Medications (MAR) | — | ✅ | ✅ | — | Patient detail | `get_medication_tasks`, `update_medication_status` | ✅ |
-| Appointments (assigned) | ✅ | ✅ | ✅ | ✅ | Appointments | `get_all_appointments`, `create_appointment`, `update_appointment`, `cancel_appointment`, `reschedule_appointment` | ✅ |
+| Appointments (assigned) | ✅ | ✅ | ✅ | ✅ | Appointments | `get_all_appointments`, `create_appointment`, `update_appointment`, `cancel_appointment`, `reschedule_appointment`, `cancel_appointments_by_date`, `reschedule_appointments_by_date` | ✅ |
 | Messages | ✅ | ✅ | — | ✅ | Messages | `get_my_messages`, `send_message`, `broadcast_message`, `delete_messages` | ✅ |
 | Billing (by clinician) | — | — | — | — | *AI only* | `get_billing_records` | 🔧 |
 | Own profile / password | — | ✅ | ✅ | — | Profile modal | `update_my_profile`, `change_my_password` | ✅ |
@@ -76,8 +76,8 @@ This document lists CRUD capabilities exposed in the **web portal** by role, and
 
 ## Mutation safety (AI assistant)
 
-All write operations **must** call an MCP tool and confirm the tool response before telling the user an action succeeded. The system prompt enforces this for profile updates, message deletion, payments, and scheduling.
+All write operations **must** call an MCP tool and confirm the tool response before telling the user an action succeeded. The system prompt enforces this for profile updates, message deletion, payments, and scheduling. Bulk appointment requests (cancel/move all on a date) must use `cancel_appointments_by_date` or `reschedule_appointments_by_date` — reading the schedule alone does not mutate data.
 
 ---
 
-*Generated for VitalTrust 3.0.341 — review after factory reset when seed data changes.*
+*Generated for VitalTrust 3.0.350 — review after factory reset when seed data changes.*

@@ -29,7 +29,7 @@ export default function Documentation({ user }: DocumentationProps) {
   const [mcpRoleFilter, setMcpRoleFilter] = useState<string>('all');
   const [selectedTool, setSelectedTool] = useState<string | null>('get_my_profile');
 
-  // MCP tool registry — synced with server-mcp-tools.ts ROLE_TOOLS (v3.0.341)
+  // MCP tool registry — synced with server-mcp-tools.ts ROLE_TOOLS (v3.0.350)
   const mcpTools: MCPToolDoc[] = [
     {
       name: "get_my_profile",
@@ -120,7 +120,7 @@ export default function Documentation({ user }: DocumentationProps) {
     },
     {
       name: "cancel_appointment",
-      description: "Delete or cancel an appointment by ID. Same authorization rules as update_appointment.",
+      description: "Delete or cancel one appointment by ID. Same authorization rules as update_appointment. For bulk cancel on a date use cancel_appointments_by_date.",
       role: "all",
       parameters: {
         appointmentId: { type: "string", description: "The ID of the appointment to cancel.", required: true }
@@ -130,7 +130,7 @@ export default function Documentation({ user }: DocumentationProps) {
     },
     {
       name: "reschedule_appointment",
-      description: "Change an appointment date and time. Same authorization rules as cancel_appointment.",
+      description: "Change one appointment date and time. Same authorization rules as cancel_appointment. For bulk day moves use reschedule_appointments_by_date.",
       role: "all",
       parameters: {
         appointmentId: { type: "string", description: "The ID of the appointment.", required: true },
@@ -139,6 +139,27 @@ export default function Documentation({ user }: DocumentationProps) {
       },
       samplePayload: { appointmentId: "apt124", date: "2026-07-20", time: "10:30 AM" },
       securityImpact: "Partial appointment update; logged in audit trail."
+    },
+    {
+      name: "cancel_appointments_by_date",
+      description: "Cancel ALL appointments on a given date that the user may modify. Matches bulk delete from the Appointments panel. Use for 'cancel all appointments on August 8'.",
+      role: "all",
+      parameters: {
+        date: { type: "string", description: "Calendar date (YYYY-MM-DD or natural language e.g. August 9).", required: true }
+      },
+      samplePayload: { date: "2026-08-08" },
+      securityImpact: "Bulk destructive scheduling; same authorization as cancel_appointment per row."
+    },
+    {
+      name: "reschedule_appointments_by_date",
+      description: "Move ALL appointments from one date to another, preserving each appointment's time. Use for 'move all August 9 appointments to August 17'.",
+      role: "all",
+      parameters: {
+        sourceDate: { type: "string", description: "Current date of appointments to move.", required: true },
+        targetDate: { type: "string", description: "New date for those appointments.", required: true }
+      },
+      samplePayload: { sourceDate: "2026-08-09", targetDate: "2026-08-17" },
+      securityImpact: "Bulk appointment update; same authorization as reschedule_appointment per row."
     },
     {
       name: "send_message",

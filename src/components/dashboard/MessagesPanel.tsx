@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MessageSquare, Send, Inbox, Mail, Shield, X, Trash2 } from 'lucide-react';
+import { MessageSquare, Send, Inbox, Mail, Shield, X, Trash2, RefreshCcw } from 'lucide-react';
 import { User, ChatMessage } from '../../types';
 import { api } from '../../services/api';
 import { canSendMessage } from '../../messaging-rules';
@@ -21,14 +21,23 @@ export default function MessagesPanel({ user }: MessagesPanelProps) {
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const fetchMessages = async () => {
+    setIsRefreshing(true);
+    try {
+      const [msgs, users] = await Promise.all([api.getMessages(user.id), api.getMessageDirectory()]);
+      setMessages(msgs);
+      setAllUsers(users);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    Promise.all([api.getMessages(user.id), api.getMessageDirectory()])
-      .then(([msgs, users]) => {
-        setMessages(msgs);
-        setAllUsers(users);
-      })
-      .catch(console.error);
+    fetchMessages();
   }, [user.id]);
 
   const recipients = useMemo(
@@ -144,7 +153,7 @@ export default function MessagesPanel({ user }: MessagesPanelProps) {
         </div>
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap items-center">
         {(['all', 'inbox', 'sent'] as const).map((f) => (
           <button
             key={f}
@@ -158,6 +167,14 @@ export default function MessagesPanel({ user }: MessagesPanelProps) {
             {f}
           </button>
         ))}
+        <button
+          onClick={fetchMessages}
+          disabled={isRefreshing}
+          className="flex items-center gap-2 px-4 py-2 bg-epic-blue hover:bg-epic-dark text-white rounded-xl transition-all disabled:opacity-50 font-bold text-xs uppercase tracking-wider"
+        >
+          <RefreshCcw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+          REFRESH
+        </button>
       </div>
 
       <div className="clinical-card overflow-hidden">

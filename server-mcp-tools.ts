@@ -21,6 +21,7 @@ export const ROLE_TOOLS: Record<string, string[]> = {
     "get_my_profile", "get_my_clinical_summary", "get_my_medications", "get_my_appointments",
     "get_my_lab_results", "get_my_billing", "get_my_messages",
     "create_appointment", "update_appointment", "cancel_appointment", "reschedule_appointment",
+    "cancel_appointments_by_date", "reschedule_appointments_by_date",
     "send_message", "delete_messages", "pay_bill",
     "update_my_profile", "change_my_password"
   ],
@@ -29,6 +30,7 @@ export const ROLE_TOOLS: Record<string, string[]> = {
     "update_medication_status", "update_patient_status",
     "get_all_appointments", "create_appointment", "update_appointment",
     "cancel_appointment", "reschedule_appointment",
+    "cancel_appointments_by_date", "reschedule_appointments_by_date",
     "get_my_messages", "send_message", "broadcast_message", "delete_messages",
     "get_billing_records",
     "update_my_profile", "change_my_password"
@@ -38,6 +40,7 @@ export const ROLE_TOOLS: Record<string, string[]> = {
     "get_patient_vitals", "record_vitals", "prescribe_medication", "discontinue_medication",
     "update_patient_status",
     "create_appointment", "update_appointment", "cancel_appointment", "reschedule_appointment",
+    "cancel_appointments_by_date", "reschedule_appointments_by_date",
     "get_my_messages", "send_message", "broadcast_message", "delete_messages",
     "get_billing_records",
     "update_my_profile", "change_my_password"
@@ -50,6 +53,7 @@ export const ROLE_TOOLS: Record<string, string[]> = {
     "get_patient_vitals", "record_vitals", "get_medication_tasks", "update_medication_status",
     "prescribe_medication", "discontinue_medication", "update_patient_status",
     "create_appointment", "update_appointment", "cancel_appointment", "reschedule_appointment",
+    "cancel_appointments_by_date", "reschedule_appointments_by_date",
     "get_my_messages", "send_message", "broadcast_message", "delete_messages",
     "get_billing_records",
     "get_my_profile", "get_my_clinical_summary", "get_my_medications", "get_my_appointments",
@@ -64,6 +68,42 @@ function canModifyAppointment(apt: any, uId: string, uRole: string): boolean {
   if (uRole === "doctor") return apt.doctorId === uId;
   if (uRole === "nurse") return apt.nurseId === uId;
   return false;
+}
+
+/** Normalize natural-language or ISO dates to YYYY-MM-DD for appointment matching. */
+export function normalizeAppointmentDate(input: string): string | null {
+  const trimmed = String(input || "").trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const withYear = /\b\d{4}\b/.test(trimmed) ? trimmed : `${trimmed}, 2026`;
+  const parsed = new Date(withYear);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().split("T")[0];
+  }
+  return null;
+}
+
+function datesMatch(aptDate: string, queryInput: string): boolean {
+  const normalized = normalizeAppointmentDate(queryInput);
+  if (normalized) return aptDate === normalized;
+  return aptDate === String(queryInput || "").trim();
+}
+
+async function listAppointmentsForUser(
+  db: McpDbClient,
+  uId: string,
+  uRole: string
+): Promise<any[]> {
+  if (uRole === "patient") {
+    const list = await db.get(`/api/dbserver/appointments?patientId=${uId}`);
+    return Array.isArray(list) ? list : [];
+  }
+  if (uRole === "doctor") {
+    const list = await db.get(`/api/dbserver/appointments?doctorId=${uId}`);
+    return Array.isArray(list) ? list : [];
+  }
+  const list = await db.get("/api/dbserver/appointments");
+  return Array.isArray(list) ? list : [];
 }
 
 async function getAppointmentById(db: McpDbClient, appointmentId: string): Promise<any | null> {
@@ -212,6 +252,86 @@ export async function runMcpTool(
       if (doctorId !== undefined) payload.doctorId = doctorId;
       if (nurseId !== undefined) payload.nurseId = nurseId;
       return db.put(`/api/dbserver/appointments/${appointmentId}`, payload);
+    }
+
+    case "cancel_appointments_by_date": {
+      const { date } = args;
+      if (!date) return { error: "Missing required parameter: date (YYYY-MM-DD or e.g. August 9)" };
+      const normalizedDate = normalizeAppointmentDate(date);
+      const all = await listAppointmentsForUser(db, uId, uRole);
+      const targets = all.filter(
+        (apt) => datesMatch(apt.date, date) && canModifyAppointment(apt, uId, uRole)
+      );
+      if (targets.length === 0) {
+        return {
+          success: true,
+          cancelled: 0,
+          message: `No modifiable appointments found on ${normalizedDate || date}`,
+        };
+      }
+      const qs = `?requesterId=${encodeURIComponent(uId)}&requesterRole=${encodeURIComponent(uRole)}`;
+      const cancelled: string[] = [];
+      const errors: string[] = [];
+      for (const apt of targets) {
+        try {
+          await db.delete(`/api/dbserver/appointments/${apt.id}${qs}`);
+          cancelled.push(apt.id);
+        } catch (err: any) {
+          errors.push(`${apt.id}: ${err?.message || String(err)}`);
+        }
+      }
+      return {
+        success: errors.length === 0,
+        cancelled: cancelled.length,
+        date: normalizedDate || date,
+        appointmentIds: cancelled,
+        errors: errors.length ? errors : undefined,
+      };
+    }
+
+    case "reschedule_appointments_by_date": {
+      const { sourceDate, targetDate } = args;
+      if (!sourceDate || !targetDate) {
+        return { error: "Missing required parameters: sourceDate and targetDate" };
+      }
+      const normalizedTarget = normalizeAppointmentDate(targetDate);
+      if (!normalizedTarget) {
+        return { error: `Could not parse targetDate: ${targetDate}` };
+      }
+      const all = await listAppointmentsForUser(db, uId, uRole);
+      const targets = all.filter(
+        (apt) => datesMatch(apt.date, sourceDate) && canModifyAppointment(apt, uId, uRole)
+      );
+      if (targets.length === 0) {
+        return {
+          success: true,
+          rescheduled: 0,
+          message: `No modifiable appointments found on ${sourceDate}`,
+        };
+      }
+      const rescheduled: string[] = [];
+      const errors: string[] = [];
+      for (const apt of targets) {
+        try {
+          await db.put(`/api/dbserver/appointments/${apt.id}`, {
+            date: normalizedTarget,
+            time: apt.time,
+            requesterId: uId,
+            requesterRole: uRole,
+          });
+          rescheduled.push(apt.id);
+        } catch (err: any) {
+          errors.push(`${apt.id}: ${err?.message || String(err)}`);
+        }
+      }
+      return {
+        success: errors.length === 0,
+        rescheduled: rescheduled.length,
+        sourceDate: normalizeAppointmentDate(sourceDate) || sourceDate,
+        targetDate: normalizedTarget,
+        appointmentIds: rescheduled,
+        errors: errors.length ? errors : undefined,
+      };
     }
 
     case "update_my_profile": {

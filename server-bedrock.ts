@@ -201,7 +201,7 @@ export async function executeBedrockChat(options: BedrockChatOptions): Promise<{
   const messages = mapHistoryToBedrockMessages(options.history, options.userMessage);
   let resolvedModelId: string | null = null;
 
-  let loopLimit = 5;
+  let loopLimit = 12;
   let replyText = "";
 
   while (loopLimit > 0) {
