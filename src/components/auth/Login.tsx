@@ -9,26 +9,45 @@ interface LoginProps {
   onLogin: (user: User) => void;
 }
 
+function countPasswordCharacterClasses(password: string): number {
+  let classes = 0;
+  if (/[a-z]/.test(password)) classes++;
+  if (/[A-Z]/.test(password)) classes++;
+  if (/[0-9]/.test(password)) classes++;
+  if (/[^A-Za-z0-9]/.test(password)) classes++;
+  return classes;
+}
+
+function validateBootstrapPassword(password: string): string | null {
+  if (password.length < 8) return "Password must be at least 8 characters.";
+  if (countPasswordCharacterClasses(password) < 3) {
+    return "Password must include at least 3 of: lowercase, uppercase, number, symbol.";
+  }
+  return null;
+}
+
 export default function Login({ onLogin }: LoginProps) {
   const [showSplash, setShowSplash] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [configError, setConfigError] = useState<string | null>(null);
+  const [needsBootstrap, setNeedsBootstrap] = useState(false);
+  const [bootstrapPassword, setBootstrapPassword] = useState('');
+  const [bootstrapError, setBootstrapError] = useState('');
+  const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [bootstrapSuccess, setBootstrapSuccess] = useState(false);
 
   useEffect(() => {
     fetch('/api/auth/config')
       .then(res => res.json())
       .then(data => {
         if (data && data.defaultPasswordConfigured === false) {
-          setConfigError(
-            "Error: Default password not defined in .env file. Please add the 'DEFAULT_PASSWORD_SHA256' environment variable to your .env file and run DeployVitalTrust.sh again."
-          );
+          setNeedsBootstrap(true);
         }
       })
       .catch(() => {
-        setConfigError(null);
+        setNeedsBootstrap(false);
       });
   }, []);
 
@@ -37,6 +56,35 @@ export default function Login({ onLogin }: LoginProps) {
     const timer = setTimeout(() => setShowSplash(false), 0);
     return () => clearTimeout(timer);
   }, []);
+
+  const handleBootstrapSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBootstrapError('');
+
+    const policyError = validateBootstrapPassword(bootstrapPassword);
+    if (policyError) {
+      setBootstrapError(policyError);
+      return;
+    }
+
+    setBootstrapLoading(true);
+    try {
+      const res = await api.bootstrapDefaultPassword(bootstrapPassword);
+      if (res?.success) {
+        setBootstrapSuccess(true);
+        setNeedsBootstrap(false);
+        setUsername('admin');
+        setPassword(bootstrapPassword);
+        setBootstrapPassword('');
+      } else {
+        setBootstrapError(res?.error || 'Failed to create default credentials.');
+      }
+    } catch (err: any) {
+      setBootstrapError(err?.message || 'Failed to create default credentials.');
+    } finally {
+      setBootstrapLoading(false);
+    }
+  };
 
   const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,18 +158,63 @@ export default function Login({ onLogin }: LoginProps) {
     return () => window.removeEventListener('message', handleMessage);
   }, [onLogin]);
 
-  if (configError) {
+  if (needsBootstrap) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
-        <div className="max-w-xl w-full bg-white rounded-3xl border border-red-200 shadow-xl p-10 text-center space-y-4">
-          <div className="mx-auto w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-[#7c1a1a] border border-red-100">
-            <Shield size={28} />
+        <div className="max-w-xl w-full bg-white rounded-3xl border border-red-200 shadow-xl p-10 space-y-6">
+          <div className="text-center space-y-3">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-[#7c1a1a] border border-red-100">
+              <Shield size={28} />
+            </div>
+            <h1 className="text-xl font-bold text-slate-900">Create Default Credentials</h1>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Please create a password that can be used for initial login for users in the Vital Trust local user store.
+              Login with username <span className="font-bold text-slate-800">admin</span> and the password you create below.
+            </p>
+            <p className="text-xs text-slate-400">
+              Minimum 8 characters with at least 3 character classes (lowercase, uppercase, number, symbol).
+            </p>
           </div>
-          <h1 className="text-xl font-bold text-slate-900">Configuration Required</h1>
-          <p className="text-sm text-slate-600 leading-relaxed">{configError}</p>
-          <p className="text-xs text-slate-400 font-mono pt-2">
-            Compute SHA-256 of your lab password locally, then set DEFAULT_PASSWORD_SHA256 in .env
-          </p>
+
+          <form onSubmit={handleBootstrapSubmit} className="space-y-4">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
+                Default Password
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input
+                  type="password"
+                  value={bootstrapPassword}
+                  onChange={(e) => setBootstrapPassword(e.target.value)}
+                  placeholder="Create default password"
+                  className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#7c1a1a] focus:border-transparent outline-none transition-all text-sm font-semibold text-slate-800"
+                  required
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            {bootstrapError && (
+              <div className="p-3.5 bg-red-50 border border-red-100 rounded-xl flex items-center gap-3 text-red-600 text-xs font-semibold leading-relaxed">
+                <Shield className="shrink-0" size={15} />
+                {bootstrapError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={bootstrapLoading}
+              className="w-full bg-[#7c1a1a] hover:bg-black text-white font-bold py-3.5 px-6 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-red-900/10 disabled:opacity-50 active:translate-y-px text-sm"
+            >
+              {bootstrapLoading ? <Loader2 className="animate-spin" size={18} /> : (
+                <>
+                  Create Default Credentials
+                  <ChevronRight size={16} />
+                </>
+              )}
+            </button>
+          </form>
         </div>
       </div>
     );
@@ -267,7 +360,11 @@ export default function Login({ onLogin }: LoginProps) {
               </div>
 
               <h3 className="text-2xl lg:text-3xl font-extrabold text-slate-950 tracking-tight">Patient or Clinician Sign-In</h3>
-              <p className="text-slate-500 mt-2 text-sm font-medium">Please enter your institutional credentials.</p>
+              <p className="text-slate-500 mt-2 text-sm font-medium">
+                {bootstrapSuccess
+                  ? "Default credentials created. Sign in with username admin and your new password."
+                  : "Please enter your institutional credentials."}
+              </p>
             </div>
 
             <form onSubmit={handleCredentialsSubmit} className="space-y-4">

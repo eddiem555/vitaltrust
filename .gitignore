@@ -5,6 +5,7 @@
 
 # Persistent file database
 persistent_db.json
+local_auth_config.json
 
 # Dependencies
 node_modules/

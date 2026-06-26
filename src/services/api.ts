@@ -103,6 +103,15 @@ export const api = {
     return handleResponseSafe(res);
   },
 
+  async bootstrapDefaultPassword(password: string) {
+    const res = await fetch(`/api/auth/bootstrap-default-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    return handleResponseSafe(res);
+  },
+
   async getDuoAuthUrl() {
     const res = await fetch(`/api/auth/duo/url`);
     return handleResponse(res);

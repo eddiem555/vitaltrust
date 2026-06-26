@@ -24,6 +24,7 @@ const DOCTOR_NAMES: Record<string, string> = {
   doctor8: 'Dr. Hannibal Lecter',
   doctor9: 'Dr. John Watson',
   doctor10: 'Dr. Ken Jeong',
+  doctor: 'Dr. Doctor Demo',
 };
 
 const NURSE_NAMES: Record<string, string> = {
@@ -37,6 +38,7 @@ const NURSE_NAMES: Record<string, string> = {
   nurse8: 'Nurse Trixie Franklin',
   nurse9: 'Nurse Julia Ogden',
   nurse10: 'Nurse Margaret Houlihan',
+  nurse: 'Nurse Demo',
 };
 
 /** Reference date for seed data (matches VERSION_DATE). */
@@ -82,6 +84,24 @@ export function buildInitialBilling(): BillingRecord[] {
         nurseName: NURSE_NAMES[nurseId] || nurseId,
       });
     }
+  }
+
+  for (let j = 0; j < 4; j++) {
+    const daysBack = 30 + j * 90;
+    const billDate = new Date(SEED_TODAY);
+    billDate.setUTCDate(billDate.getUTCDate() - daysBack);
+    bills.push({
+      id: `bill_patient_demo_${j}`,
+      patientId: 'patient',
+      date: formatDate(billDate),
+      description: BILL_DESC[j % BILL_DESC.length],
+      amount: 75 + j * 40,
+      status: BILL_STATUS[j % BILL_STATUS.length],
+      doctorId: 'doctor',
+      doctorName: DOCTOR_NAMES.doctor,
+      nurseId: 'nurse',
+      nurseName: NURSE_NAMES.nurse,
+    });
   }
 
   return bills.sort((a, b) => b.date.localeCompare(a.date));

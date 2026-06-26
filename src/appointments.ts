@@ -41,6 +41,21 @@ export function buildInitialAppointments(): Appointment[] {
       });
     }
   }
+  // Demo patient (id: patient) — assigned to demo doctor/nurse accounts
+  const demoTeam = { doctorId: 'doctor', nurseId: 'nurse' };
+  for (let j = 0; j < 4; j++) {
+    const daysOut = 7 + j * 14;
+    appointments.push({
+      id: `apt_patient_${j}`,
+      patientId: 'patient',
+      doctorId: demoTeam.doctorId,
+      nurseId: demoTeam.nurseId,
+      date: futureDate(daysOut),
+      time: TIMES[j % TIMES.length],
+      reason: REASONS[j % REASONS.length],
+      status: j === 0 ? 'confirmed' : 'pending',
+    });
+  }
   return appointments;
 }
 
