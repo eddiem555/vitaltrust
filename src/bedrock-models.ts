@@ -5,8 +5,10 @@ export const BEDROCK_MODEL_IDS = [
   "anthropic.claude-haiku-4-5-20251001-v1:0",
   "anthropic.claude-sonnet-4-20250514-v1:0",
   "anthropic.claude-3-5-haiku-20241022-v1:0",
+  "anthropic.claude-opus-4-1-20250805-v1:0",
   "amazon.nova-pro-v1:0",
   "amazon.nova-lite-v1:0",
+  "meta.llama3-3-70b-instruct-v1:0",
 ] as const;
 
 export const BEDROCK_UI_MODELS = BEDROCK_MODEL_IDS.map(

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Send, Bot, Database, Sparkles, User as UserIcon, Lock, Key, Settings, AlertTriangle, RotateCcw } from 'lucide-react';
 import { migrateEolBedrockModelId, stripBedrockUiPrefix } from '../../bedrock-models';
+import { migrateEolClaudeModelId, stripClaudeUiPrefix } from '../../claude-models';
 import { User } from '../../types';
 
 interface Message {
@@ -9,8 +10,9 @@ interface Message {
   content: string;
 }
 
-function getModelFamily(model: string): 'openai' | 'groq' | 'gemini' | 'bedrock' {
+function getModelFamily(model: string): 'openai' | 'groq' | 'gemini' | 'claude' | 'bedrock' {
   const m = model.toLowerCase();
+  if (m.startsWith('claude -')) return 'claude';
   if (m.includes('openai') || m.startsWith('o3')) return 'openai';
   if (m.includes('llama') || m.includes('qwen') || m.includes('kimi')) return 'groq';
   if (m.includes('gemini')) return 'gemini';
@@ -64,6 +66,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   const [openaiKey, setOpenaiKey] = useState<string>('');
   const [groqKey, setGroqKey] = useState<string>('');
   const [geminiKey, setGeminiKey] = useState<string>('');
+  const [claudeKey, setClaudeKey] = useState<string>('');
   const [awsRegion, setAwsRegion] = useState<string>('us-east-1');
   const [awsAccessKey, setAwsAccessKey] = useState<string>('');
   const [awsSecretKey, setAwsSecretKey] = useState<string>('');
@@ -74,10 +77,12 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   const [serverKeysConfig, setServerKeysConfig] = useState<{
     geminiAvailable: boolean;
     openaiAvailable: boolean;
+    claudeAvailable: boolean;
     activeProvider: string;
   }>({
     geminiAvailable: false,
     openaiAvailable: false,
+    claudeAvailable: false,
     activeProvider: 'local'
   });
 
@@ -95,12 +100,19 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
       if (migrated !== storedModel) {
         localStorage.setItem('vt_ai_selected_model', migrated);
       }
+    } else if (storedModel.toLowerCase().startsWith('claude -')) {
+      const migrated = `Claude - ${migrateEolClaudeModelId(stripClaudeUiPrefix(storedModel))}`;
+      setSelectedModel(migrated);
+      if (migrated !== storedModel) {
+        localStorage.setItem('vt_ai_selected_model', migrated);
+      }
     } else {
       setSelectedModel(storedModel);
     }
     setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
     setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
     setGeminiKey(localStorage.getItem('vt_ai_gemini_key') || '');
+    setClaudeKey(localStorage.getItem('vt_ai_claude_key') || '');
     setAwsRegion(localStorage.getItem('vt_ai_aws_region') || 'us-east-1');
     setAwsAccessKey(localStorage.getItem('vt_ai_aws_access_key') || '');
     setAwsSecretKey(localStorage.getItem('vt_ai_aws_secret_key') || '');
@@ -114,6 +126,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
           setServerKeysConfig({
             geminiAvailable: !!data.geminiAvailable,
             openaiAvailable: !!data.openaiAvailable,
+            claudeAvailable: !!data.claudeAvailable,
             activeProvider: data.activeProvider || 'local'
           });
           const bootId = data.bootInstanceId as string | undefined;
@@ -201,6 +214,8 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
     isConfigured = groqKey.trim().length > 0;
   } else if (activeFamily === 'gemini') {
     isConfigured = geminiKey.trim().length > 0 || serverKeysConfig.geminiAvailable;
+  } else if (activeFamily === 'claude') {
+    isConfigured = claudeKey.trim().length > 0 || serverKeysConfig.claudeAvailable;
   } else if (activeFamily === 'bedrock') {
     isConfigured = awsAccessKey.trim().length > 0 && awsSecretKey.trim().length > 0 && awsRegion.trim().length > 0;
   }
@@ -232,6 +247,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
             openaiKey,
             groqKey,
             geminiKey,
+            claudeKey,
             awsRegion,
             awsAccessKey,
             awsSecretKey,
