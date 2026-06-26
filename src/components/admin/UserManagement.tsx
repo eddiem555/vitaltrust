@@ -13,13 +13,14 @@ import {
   Stethoscope,
   Activity,
   User as UserIcon,
+  Bot,
   Save,
   RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../../services/api';
 
-type UserRole = 'admin' | 'doctor' | 'nurse' | 'patient';
+type UserRole = 'admin' | 'doctor' | 'nurse' | 'patient' | 'aiagent';
 
 interface UserRecord {
   id: string;
@@ -125,6 +126,7 @@ export default function UserManagement() {
       case 'doctor': return <Stethoscope className="text-blue-500" size={16} />;
       case 'nurse': return <Activity className="text-rose-500" size={16} />;
       case 'patient': return <UserIcon className="text-emerald-500" size={16} />;
+      case 'aiagent': return <Bot className="text-violet-500" size={16} />;
     }
   };
 
@@ -180,6 +182,7 @@ export default function UserManagement() {
                 <option value="doctor">Doctors</option>
                 <option value="nurse">Nurses</option>
                 <option value="patient">Patients</option>
+                <option value="aiagent">AI Agents</option>
               </select>
             </div>
           </div>
@@ -227,7 +230,8 @@ export default function UserManagement() {
                         <div className={`p-2 rounded-lg ${
                           user.role === 'admin' ? 'bg-amber-50' : 
                           user.role === 'doctor' ? 'bg-blue-50' : 
-                          user.role === 'nurse' ? 'bg-rose-50' : 'bg-emerald-50'
+                          user.role === 'nurse' ? 'bg-rose-50' : 
+                          user.role === 'aiagent' ? 'bg-violet-50' : 'bg-emerald-50'
                         }`}>
                           {getRoleIcon(user.role)}
                         </div>
@@ -361,7 +365,7 @@ export default function UserManagement() {
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">User Identity Role</label>
                     <div className="grid grid-cols-4 gap-3">
-                      {(['admin', 'doctor', 'nurse', 'patient'] as UserRole[]).map(role => (
+                      {(['admin', 'doctor', 'nurse', 'patient', 'aiagent'] as UserRole[]).map(role => (
                         <button
                           key={role}
                           type="button"

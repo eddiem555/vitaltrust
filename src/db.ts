@@ -50,6 +50,7 @@ function formatTenDigitPhone(phone: string, index: number): string {
 // ─── Staff seed records ─────────────────────────────────────────────────────
 
 const ADMIN_USERS = [
+  { id: 'admin', realName: 'Dennis Nedry', email: 'dennis@vitaltrust.com', phone: '555-0199', address: '170 West Tasman Dr, San Jose, CA 95134', clearance_level: 3, internal_notes: 'Lab demo administrator account (username: admin). Used for security control walkthroughs and factory-reset testing.' },
   { id: 'admin1', realName: 'Eddie Architect', email: 'eddie.architect@vitaltrust.com', phone: '555-0100', address: '170 West Tasman Dr, San Jose, CA 95134', clearance_level: 3, internal_notes: 'Superuser level 3 access. Configures security controls for duo-oidc proxy and micro-segmentation models. High-Value administrative target.' },
   { id: 'admin2', realName: 'Sarah Systems', email: 'sarah.systems@vitaltrust.com', phone: '555-0101', address: '170 West Tasman Dr, San Jose, CA 95134' },
   { id: 'admin3', realName: 'David Duval', email: 'david.duval@vitaltrust.com', phone: '555-0102', address: '170 West Tasman Dr, San Jose, CA 95134' },
@@ -58,6 +59,7 @@ const ADMIN_USERS = [
 ];
 
 const DOCTOR_USERS = [
+  { id: 'doctor', realName: 'Doctor Demo', email: 'doctor@vitaltrust.com', phone: '555-0299', address: '1 Clinical Center Way, San Jose, CA 95134', npi_number: '1689709999' },
   { id: 'doctor1', realName: 'Gregory House', email: 'g.house@hospital.com', phone: '555-0201', address: '1 Mercer St, Princeton, NJ 08540', npi_number: '1689701143' },
   { id: 'doctor2', realName: 'Stephen Strange', email: 's.strange@sanctum.com', phone: '555-0202', address: '177A Bleecker St, New York, NY 10012' },
   { id: 'doctor3', realName: 'Meredith Grey', email: 'm.grey@hospital.com', phone: '555-0203', address: '300 Terry Ave N, Seattle, WA 98109' },
@@ -71,6 +73,7 @@ const DOCTOR_USERS = [
 ];
 
 const NURSE_USERS = [
+  { id: 'nurse', realName: 'Nurse Demo', email: 'nurse@vitaltrust.com', phone: '555-0399', address: '1 Clinical Center Way, San Jose, CA 95134', assigned_ward: 'General Medicine - Ward A' },
   { id: 'nurse1', realName: 'Nurse Ratched', email: 'm.ratched@vitaltrust.com', phone: '555-0301', address: '2600 Center St NE, Salem, OR 97301', assigned_ward: 'Mental Health Residence - Ward B' },
   { id: 'nurse2', realName: 'Abby Lockhart', email: 'a.lockhart@vitaltrust.com', phone: '555-0302', address: '1901 W Harrison St, Chicago, IL 60612' },
   { id: 'nurse3', realName: 'Jackie Peyton', email: 'j.peyton@vitaltrust.com', phone: '555-0303', address: '421 E 14th St, New York, NY 10009' },
@@ -81,6 +84,12 @@ const NURSE_USERS = [
   { id: 'nurse8', realName: 'Nurse Trixie Franklin', email: 't.franklin@midwives.uk', phone: '555-0308', address: 'Nonnatus House, London, UK' },
   { id: 'nurse9', realName: 'Nurse Julia Ogden', email: 'j.ogden@toronto.ca', phone: '555-0309', address: 'Toronto Station #4, Toronto, ON' },
   { id: 'nurse10', realName: 'Nurse Margaret Houlihan', email: 'm.houlihan@army.mil', phone: '555-0310', address: 'MASH 4077, South Korea' },
+];
+
+/** Autonomous agent service accounts (local identities for background agents). */
+const AI_AGENT_USERS = [
+  { id: 'aiagent1', realName: 'ChartUpdater Agent', email: 'chartupdateragent@vitaltrust.com' },
+  { id: 'aiagent2', realName: 'Overnight Nurse Agent', email: 'overnightnurseagent@vitaltrust.com' },
 ];
 
 /** All 50 patient identities — single roster */
@@ -129,6 +138,18 @@ const PATIENT_ROSTER: Array<{
   }),
 ];
 
+/** Lab demo patient — username id `patient` (distinct from patient1–patient50 roster). */
+const DEMO_PATIENT = {
+  name: 'Wayne Newton',
+  email: 'patient@vitaltrust.com',
+  phone: '555-0499',
+  address: '500 Demo Patient Lane, San Jose, CA 95134',
+  dob: '1995-03-15',
+  ssn: '999-00-1234',
+  insurance_id: 'BCBS-DEMO-5001',
+  lastVisit: '2026-05-01',
+};
+
 function buildUsers(defaultPasswordHash: string) {
   const admins = ADMIN_USERS.map((a) => ({ ...a, role: 'admin' as const, password: defaultPasswordHash }));
   const doctors = DOCTOR_USERS.map((d) => ({ ...d, role: 'doctor' as const, password: defaultPasswordHash }));
@@ -142,11 +163,25 @@ function buildUsers(defaultPasswordHash: string) {
     phone: p.phone,
     address: p.address,
   }));
-  return [...admins, ...doctors, ...nurses, ...patients];
+  const demoPatient = {
+    id: 'patient',
+    role: 'patient' as const,
+    password: defaultPasswordHash,
+    realName: DEMO_PATIENT.name,
+    email: DEMO_PATIENT.email,
+    phone: DEMO_PATIENT.phone,
+    address: DEMO_PATIENT.address,
+  };
+  const aiAgents = AI_AGENT_USERS.map((a) => ({
+    ...a,
+    role: 'aiagent' as const,
+    password: defaultPasswordHash,
+  }));
+  return [...admins, ...doctors, ...nurses, ...patients, demoPatient, ...aiAgents];
 }
 
 function buildPatients() {
-  return PATIENT_ROSTER.map((p, i) => {
+  const rosterPatients = PATIENT_ROSTER.map((p, i) => {
     const num = i + 1;
     const { doctorId, nurseId } = careTeamForPatientIndex(num);
     const condition = conditionForIndex(num);
@@ -167,6 +202,24 @@ function buildPatients() {
       status: 'active' as const,
     };
   });
+  const demoCondition = 'Hypertension';
+  rosterPatients.push({
+    id: 'patient',
+    name: DEMO_PATIENT.name,
+    dob: DEMO_PATIENT.dob,
+    ssn: DEMO_PATIENT.ssn,
+    insurance_id: DEMO_PATIENT.insurance_id,
+    phone: DEMO_PATIENT.phone,
+    address: DEMO_PATIENT.address,
+    email: DEMO_PATIENT.email,
+    condition: demoCondition,
+    medications: getMedsForCondition(demoCondition),
+    lastVisit: DEMO_PATIENT.lastVisit,
+    assignedDoctorId: 'doctor',
+    assignedNurseId: 'nurse',
+    status: 'active' as const,
+  });
+  return rosterPatients;
 }
 
 function buildDoctors() {
@@ -192,6 +245,16 @@ function buildLabResults() {
       });
     }
   }
+  ['Complete Blood Count', 'Lipid Panel', 'Metabolic Panel'].forEach((testName, j) => {
+    labs.push({
+      id: `lab_patient_demo_${j}`,
+      patientId: 'patient',
+      testName,
+      date: `2026-07-${String(12 + j).padStart(2, '0')}`,
+      result: LAB_RESULTS[j % LAB_RESULTS.length],
+      notes: 'Demo patient lab result for security lab walkthroughs.',
+    });
+  });
   return labs;
 }
 
@@ -211,6 +274,17 @@ function buildMedicationsDetailed() {
       });
     }
   }
+  ['Amlodipine', 'Lisinopril'].forEach((name, j) => {
+    meds.push({
+      id: `med_patient_demo_${j}`,
+      patientId: 'patient',
+      name,
+      dosage: DOSAGES[j % DOSAGES.length],
+      frequency: 'Once daily',
+      startDate: '2026-01-15',
+      status: j === 0 ? 'administered' : 'pending',
+    });
+  });
   return meds;
 }
 
@@ -245,6 +319,18 @@ export function createInitialDb(defaultPasswordHash: string) {
   });
 
   db.patients.forEach((patient: any, index: number) => {
+    if (patient.id === 'patient') {
+      patient.vitals = {
+        hr: '72',
+        temp: '98.4',
+        bp: '122/78',
+        lastUpdated: '2026-05-28',
+      };
+      const matchUser = db.users.find((u: any) => u.id === patient.id);
+      patient.phone = matchUser ? matchUser.phone : formatTenDigitPhone(patient.phone || '', index + 100);
+      patient.clinical_notes = `Patient is currently being monitored for ${patient.condition}. The recorded treatment plan consists of physical observation and active prescription management: ${patient.medications.join(', ')}. Responding well to therapy. Lab demo account (username: patient).`;
+      return;
+    }
     const patientNum = index + 1;
     patient.condition = conditionForIndex(patientNum);
     patient.medications = getMedsForCondition(patient.condition);
@@ -298,6 +384,10 @@ export function createInitialDb(defaultPasswordHash: string) {
         user.ssn = `999-55-220${index}`;
         user.insurance_id = `BCBS-1100${index}`;
         user.clinical_notes = 'Routine clinical assessment. Stable diagnostic values.';
+      }
+    } else if (user.role === 'aiagent') {
+      if (!user.internal_notes) {
+        user.internal_notes = `Autonomous AI agent service account (${user.id}). Used by background agent scheduler — not for interactive portal login during normal operations.`;
       }
     }
   });

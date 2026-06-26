@@ -29,8 +29,9 @@ import {
 import { User } from '../../types';
 import { api } from '../../services/api';
 import { BEDROCK_UI_MODELS, migrateEolBedrockModelId, stripBedrockUiPrefix } from '../../bedrock-models';
+import { CLAUDE_UI_MODELS, migrateEolClaudeModelId, stripClaudeUiPrefix } from '../../claude-models';
 
-const MODELS = [
+const OPENAI_MODELS = [
   "OpenAI GPT-5",
   "OpenAI GPT-5-mini",
   "OpenAI GPT-5-nano",
@@ -38,14 +39,31 @@ const MODELS = [
   "OpenAI o3-mini",
   "OpenAI GPT-4o",
   "OpenAI GPT-4",
+];
+
+const GROQ_MODELS = [
   "groq-llama-3.3-70b-versatile",
   "groq-llama-4-maverick-17b-128e-instruct",
   "groq-qwen3-32b",
   "groq-kimi-k2-instruct-0905",
+];
+
+const GEMINI_MODELS = [
   "gemini-2.5-flash",
   "gemini-2.0-flash",
+];
+
+/** All models available to the interactive AI Assistant chatbot. */
+const ASSISTANT_MODELS = [
+  ...OPENAI_MODELS,
+  ...GROQ_MODELS,
+  ...GEMINI_MODELS,
+  ...CLAUDE_UI_MODELS,
   ...BEDROCK_UI_MODELS,
 ];
+
+/** Autonomous background agents — Bedrock-hosted models only. */
+const AGENT_MODELS = [...BEDROCK_UI_MODELS];
 
 const REGIONS = [
   "us-east-1",
@@ -55,13 +73,24 @@ const REGIONS = [
   "ap-southeast-1"
 ];
 
-function getModelFamily(model: string): 'openai' | 'groq' | 'gemini' | 'bedrock' {
+function getModelFamily(model: string): 'openai' | 'groq' | 'gemini' | 'claude' | 'bedrock' {
   const m = model.toLowerCase();
+  if (m.startsWith('claude -')) return 'claude';
   if (m.includes('openai') || m.startsWith('o3')) return 'openai';
   if (m.includes('llama') || m.includes('qwen') || m.includes('kimi') || m.startsWith('groq-')) return 'groq';
   if (m.includes('gemini')) return 'gemini';
   if (m.includes('bedrock')) return 'bedrock';
   return 'openai';
+}
+
+function sanitizeIntervalDigits(raw: string): string {
+  return raw.replace(/\D/g, '').slice(0, 3);
+}
+
+function parseIntervalMinutes(input: string, fallback: number): number {
+  const n = parseInt(input, 10);
+  if (!Number.isFinite(n) || n < 5) return Math.max(5, fallback);
+  return Math.min(999, n);
 }
 
 const NodeCard = ({ name, roleKey, activeRole, ip, status, url, isMono }: any) => {
@@ -120,22 +149,24 @@ export default function AISettings({ user }: { user: User }) {
   const [openaiKey, setOpenaiKey] = useState<string>('');
   const [groqKey, setGroqKey] = useState<string>('');
   const [geminiKey, setGeminiKey] = useState<string>('');
+  const [claudeKey, setClaudeKey] = useState<string>('');
   const [awsRegion, setAwsRegion] = useState<string>('us-east-1');
   const [awsAccessKey, setAwsAccessKey] = useState<string>('');
   const [awsSecretKey, setAwsSecretKey] = useState<string>('');
   const [awsCustomDns, setAwsCustomDns] = useState<string>('null');
 
-  // Autonomous agent settings (Phase 2)
+  // Autonomous agent settings
   const [agentChartUpdaterEnabled, setAgentChartUpdaterEnabled] = useState<boolean>(false);
-  const [agentTriageEnabled, setAgentTriageEnabled] = useState<boolean>(false);
-  const [agentChartUpdaterIntervalMin, setAgentChartUpdaterIntervalMin] = useState<number>(60);
-  const [agentTriageIntervalMin, setAgentTriageIntervalMin] = useState<number>(20);
+  const [agentOvernightNurseEnabled, setAgentOvernightNurseEnabled] = useState<boolean>(false);
+  const [agentChartUpdaterIntervalInput, setAgentChartUpdaterIntervalInput] = useState<string>('60');
+  const [agentOvernightNurseIntervalInput, setAgentOvernightNurseIntervalInput] = useState<string>('20');
   const [agentNightShiftOnly, setAgentNightShiftOnly] = useState<boolean>(true);
 
   // Key visibility toggles
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [showGroqKey, setShowGroqKey] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [showClaudeKey, setShowClaudeKey] = useState(false);
   const [showAwsAccessKey, setShowAwsAccessKey] = useState(false);
   const [showAwsSecretKey, setShowAwsSecretKey] = useState(false);
 
@@ -174,6 +205,8 @@ export default function AISettings({ user }: { user: User }) {
   });
 
   // UI status hooks
+  const [modelSaveSuccess, setModelSaveSuccess] = useState(false);
+  const [agentSaveSuccess, setAgentSaveSuccess] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showHowToIntegrate, setShowHowToIntegrate] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -186,12 +219,14 @@ export default function AISettings({ user }: { user: User }) {
   const [serverKeysConfig, setServerKeysConfig] = useState<{
     geminiAvailable: boolean;
     openaiAvailable: boolean;
+    claudeAvailable: boolean;
     awsBedrockAvailable: boolean;
     awsRegion?: string;
     activeProvider: string;
   }>({
     geminiAvailable: false,
     openaiAvailable: false,
+    claudeAvailable: false,
     awsBedrockAvailable: false,
     activeProvider: 'local'
   });
@@ -202,8 +237,10 @@ export default function AISettings({ user }: { user: User }) {
     const storedAssistantModel = localStorage.getItem('vt_ai_selected_model') || 'OpenAI GPT-5';
     const migratedAssistant = storedAssistantModel.toLowerCase().includes('bedrock')
       ? `Bedrock - ${migrateEolBedrockModelId(stripBedrockUiPrefix(storedAssistantModel))}`
+      : storedAssistantModel.toLowerCase().startsWith('claude -')
+      ? `Claude - ${migrateEolClaudeModelId(stripClaudeUiPrefix(storedAssistantModel))}`
       : storedAssistantModel;
-    if (MODELS.includes(migratedAssistant)) {
+    if (ASSISTANT_MODELS.includes(migratedAssistant)) {
       setSelectedModel(migratedAssistant);
       if (migratedAssistant !== storedAssistantModel) {
         localStorage.setItem('vt_ai_selected_model', migratedAssistant);
@@ -214,7 +251,7 @@ export default function AISettings({ user }: { user: User }) {
 
     const storedAgentModel = localStorage.getItem('vt_ai_agent_selected_model') || 'Bedrock - anthropic.claude-haiku-4-5-20251001-v1:0';
     const migratedAgent = `Bedrock - ${migrateEolBedrockModelId(stripBedrockUiPrefix(storedAgentModel))}`;
-    if (MODELS.includes(migratedAgent)) {
+    if (AGENT_MODELS.includes(migratedAgent)) {
       setAgentSelectedModel(migratedAgent);
       if (migratedAgent !== storedAgentModel) {
         localStorage.setItem('vt_ai_agent_selected_model', migratedAgent);
@@ -225,15 +262,25 @@ export default function AISettings({ user }: { user: User }) {
     setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
     setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
     setGeminiKey(localStorage.getItem('vt_ai_gemini_key') || '');
+    setClaudeKey(localStorage.getItem('vt_ai_claude_key') || '');
     setAwsRegion(localStorage.getItem('vt_ai_aws_region') || 'us-east-1');
     setAwsAccessKey(localStorage.getItem('vt_ai_aws_access_key') || '');
     setAwsSecretKey(localStorage.getItem('vt_ai_aws_secret_key') || '');
     setAwsCustomDns(localStorage.getItem('vt_ai_aws_custom_dns') || 'null');
 
     setAgentChartUpdaterEnabled(localStorage.getItem('vt_agent_chart_updater_enabled') === 'true');
-    setAgentTriageEnabled(localStorage.getItem('vt_agent_triage_enabled') === 'true');
-    setAgentChartUpdaterIntervalMin(parseInt(localStorage.getItem('vt_agent_chart_updater_interval_min') || '60', 10) || 60);
-    setAgentTriageIntervalMin(parseInt(localStorage.getItem('vt_agent_triage_interval_min') || '20', 10) || 20);
+    const overnightStored =
+      localStorage.getItem('vt_agent_overnight_nurse_enabled') ??
+      localStorage.getItem('vt_agent_triage_enabled');
+    setAgentOvernightNurseEnabled(overnightStored === 'true');
+    setAgentChartUpdaterIntervalInput(
+      localStorage.getItem('vt_agent_chart_updater_interval_min') || '60'
+    );
+    setAgentOvernightNurseIntervalInput(
+      localStorage.getItem('vt_agent_overnight_nurse_interval_min') ??
+        localStorage.getItem('vt_agent_triage_interval_min') ??
+        '20'
+    );
     setAgentNightShiftOnly(localStorage.getItem('vt_agent_night_shift_only') !== 'false');
 
     // Security Gateways
@@ -254,6 +301,38 @@ export default function AISettings({ user }: { user: User }) {
       }
     }
 
+    fetch('/api/agents/config')
+      .then(res => res.json())
+      .then(data => {
+        if (data && typeof data === 'object') {
+          if (typeof data.chartUpdaterEnabled === 'boolean') setAgentChartUpdaterEnabled(data.chartUpdaterEnabled);
+          const overnightEnabled =
+            typeof data.overnightNurseEnabled === 'boolean'
+              ? data.overnightNurseEnabled
+              : typeof data.triageEnabled === 'boolean'
+              ? data.triageEnabled
+              : undefined;
+          if (typeof overnightEnabled === 'boolean') setAgentOvernightNurseEnabled(overnightEnabled);
+          if (typeof data.chartUpdaterIntervalMin === 'number') {
+            setAgentChartUpdaterIntervalInput(String(data.chartUpdaterIntervalMin));
+          }
+          const overnightInterval =
+            typeof data.overnightNurseIntervalMin === 'number'
+              ? data.overnightNurseIntervalMin
+              : typeof data.triageIntervalMin === 'number'
+              ? data.triageIntervalMin
+              : undefined;
+          if (typeof overnightInterval === 'number') {
+            setAgentOvernightNurseIntervalInput(String(overnightInterval));
+          }
+          if (typeof data.nightShiftOnly === 'boolean') setAgentNightShiftOnly(data.nightShiftOnly);
+          if (data.agentModel && AGENT_MODELS.includes(data.agentModel)) {
+            setAgentSelectedModel(data.agentModel);
+          }
+        }
+      })
+      .catch(err => console.error('Error fetching agent config:', err));
+
     // Fetch server keys fallback
     fetch('/api/ai/config')
       .then(res => res.json())
@@ -262,6 +341,7 @@ export default function AISettings({ user }: { user: User }) {
           setServerKeysConfig({
             geminiAvailable: !!data.geminiAvailable,
             openaiAvailable: !!data.openaiAvailable,
+            claudeAvailable: !!data.claudeAvailable,
             awsBedrockAvailable: !!data.awsBedrockAvailable,
             awsRegion: data.awsRegion,
             activeProvider: data.activeProvider || 'local'
@@ -338,28 +418,75 @@ export default function AISettings({ user }: { user: User }) {
   };
 
   // Saves AI Models Creds
-  const handleSaveModelSettings = (e: React.FormEvent) => {
+  const handleSaveModelSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     localStorage.setItem('vt_ai_selected_model', selectedModel);
     localStorage.setItem('vt_ai_agent_selected_model', agentSelectedModel);
     localStorage.setItem('vt_ai_openai_key', openaiKey);
     localStorage.setItem('vt_ai_groq_key', groqKey);
     localStorage.setItem('vt_ai_gemini_key', geminiKey);
+    localStorage.setItem('vt_ai_claude_key', claudeKey);
     localStorage.setItem('vt_ai_aws_region', awsRegion);
     localStorage.setItem('vt_ai_aws_access_key', awsAccessKey);
     localStorage.setItem('vt_ai_aws_secret_key', awsSecretKey);
     localStorage.setItem('vt_ai_aws_custom_dns', awsCustomDns);
 
-    localStorage.setItem('vt_agent_chart_updater_enabled', String(agentChartUpdaterEnabled));
-    localStorage.setItem('vt_agent_triage_enabled', String(agentTriageEnabled));
-    localStorage.setItem('vt_agent_chart_updater_interval_min', String(agentChartUpdaterIntervalMin));
-    localStorage.setItem('vt_agent_triage_interval_min', String(agentTriageIntervalMin));
-    localStorage.setItem('vt_agent_night_shift_only', String(agentNightShiftOnly));
+    try {
+      await fetch('/api/agents/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentModel: agentSelectedModel,
+          awsRegion,
+          awsAccessKey,
+          awsSecretKey,
+          awsCustomDns,
+        }),
+      });
+    } catch (err) {
+      console.error('Failed to sync model credentials to server:', err);
+    }
 
     window.dispatchEvent(new Event('vt_settings_updated'));
-    setSaveSuccess(true);
+    setModelSaveSuccess(true);
     setTimeout(() => {
-      setSaveSuccess(false);
+      setModelSaveSuccess(false);
+    }, 3000);
+  };
+
+  const handleSaveAgentSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const chartUpdaterIntervalMin = parseIntervalMinutes(agentChartUpdaterIntervalInput, 60);
+    const overnightNurseIntervalMin = parseIntervalMinutes(agentOvernightNurseIntervalInput, 20);
+    setAgentChartUpdaterIntervalInput(String(chartUpdaterIntervalMin));
+    setAgentOvernightNurseIntervalInput(String(overnightNurseIntervalMin));
+
+    localStorage.setItem('vt_agent_chart_updater_enabled', String(agentChartUpdaterEnabled));
+    localStorage.setItem('vt_agent_overnight_nurse_enabled', String(agentOvernightNurseEnabled));
+    localStorage.setItem('vt_agent_chart_updater_interval_min', String(chartUpdaterIntervalMin));
+    localStorage.setItem('vt_agent_overnight_nurse_interval_min', String(overnightNurseIntervalMin));
+    localStorage.setItem('vt_agent_night_shift_only', String(agentNightShiftOnly));
+
+    try {
+      await fetch('/api/agents/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chartUpdaterEnabled: agentChartUpdaterEnabled,
+          overnightNurseEnabled: agentOvernightNurseEnabled,
+          chartUpdaterIntervalMin,
+          overnightNurseIntervalMin,
+          nightShiftOnly: agentNightShiftOnly,
+        }),
+      });
+    } catch (err) {
+      console.error('Failed to sync agent config to server:', err);
+    }
+
+    window.dispatchEvent(new Event('vt_settings_updated'));
+    setAgentSaveSuccess(true);
+    setTimeout(() => {
+      setAgentSaveSuccess(false);
     }, 3000);
   };
 
@@ -608,8 +735,9 @@ export default function AISettings({ user }: { user: User }) {
 
   const assistantFamily = getModelFamily(selectedModel);
   const agentFamily = getModelFamily(agentSelectedModel);
-  const bedrockCredentialsActive = assistantFamily === 'bedrock' || agentFamily === 'bedrock';
-  const usesProvider = (family: 'openai' | 'groq' | 'gemini' | 'bedrock') =>
+  const bedrockCredentialsActive =
+    assistantFamily === 'bedrock' || agentFamily === 'bedrock' || agentChartUpdaterEnabled || agentOvernightNurseEnabled;
+  const usesProvider = (family: 'openai' | 'groq' | 'gemini' | 'claude' | 'bedrock') =>
     assistantFamily === family || agentFamily === family;
 
   return (
@@ -678,6 +806,7 @@ export default function AISettings({ user }: { user: User }) {
       <div className="space-y-6">
         {/* Tab 1: AI Model Settings */}
         {activeSubTab === 'model' && (
+          <>
           <form onSubmit={handleSaveModelSettings} className="space-y-6">
             <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden">
               <div className="p-6 bg-gradient-to-r from-[#7c1a1a] to-[#a32d2d] text-white flex justify-between items-center">
@@ -694,74 +823,7 @@ export default function AISettings({ user }: { user: User }) {
               </div>
 
               <div className="p-8 space-y-6">
-                {/* AI Assistant model */}
-                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-150 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                  <div>
-                    <label className="text-xs font-black uppercase text-slate-700 tracking-wider">
-                      AI Assistant Model
-                    </label>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      LLM for interactive human-driven consultations via the AI Assistant chatbot.
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="relative">
-                      <select
-                        value={selectedModel}
-                        onChange={(e) => setSelectedModel(e.target.value)}
-                        className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 appearance-none focus:outline-none cursor-pointer pr-10"
-                      >
-                        {MODELS.map((m) => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                        <ChevronDown size={14} />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
-                      <Sparkles className="text-amber-500" size={12} />
-                      <span>Routing under </span>
-                      <span className="font-extrabold text-[#7c1a1a] uppercase">{assistantFamily}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* AI Agents model */}
-                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-150 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                  <div>
-                    <label className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-1.5">
-                      <Bot size={14} className="text-[#7c1a1a]" />
-                      AI Agents Model
-                    </label>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      LLM for autonomous background agents (chart updater, overnight triage nurse).
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="relative">
-                      <select
-                        value={agentSelectedModel}
-                        onChange={(e) => setAgentSelectedModel(e.target.value)}
-                        className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 appearance-none focus:outline-none cursor-pointer pr-10"
-                      >
-                        {MODELS.map((m) => (
-                          <option key={`agent-${m}`} value={m}>{m}</option>
-                        ))}
-                      </select>
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                        <ChevronDown size={14} />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
-                      <Sparkles className="text-amber-500" size={12} />
-                      <span>Agents routing under </span>
-                      <span className="font-extrabold text-[#7c1a1a] uppercase">{agentFamily}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* API Keys Configuration */}
+                {/* API Keys Configuration — listed first */}
                 <div className="space-y-5">
                   <h5 className="text-xs font-black uppercase text-slate-500 tracking-wider flex items-center gap-2">
                     <Key size={14} className="text-[#7c1a1a]" />
@@ -774,9 +836,6 @@ export default function AISettings({ user }: { user: User }) {
                       <div className="flex justify-between items-center mb-1.5">
                         <label className="text-xs font-bold text-slate-700">OpenAI API Key</label>
                         <div className="flex items-center gap-1.5">
-                          {serverKeysConfig.openaiAvailable && (
-                            <span className="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-extrabold uppercase border border-emerald-100">● .env Default</span>
-                          )}
                           {usesProvider('openai') && (
                             <span className="text-[9px] bg-red-50 text-[#7c1a1a] px-1.5 py-0.5 rounded font-extrabold uppercase border border-red-100">Active</span>
                           )}
@@ -833,9 +892,6 @@ export default function AISettings({ user }: { user: User }) {
                       <div className="flex justify-between items-center mb-1.5">
                         <label className="text-xs font-bold text-slate-700">Gemini API Key</label>
                         <div className="flex items-center gap-1.5">
-                          {serverKeysConfig.geminiAvailable && (
-                            <span className="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-extrabold uppercase border border-emerald-100">● .env Default</span>
-                          )}
                           {usesProvider('gemini') && (
                             <span className="text-[9px] bg-red-50 text-[#7c1a1a] px-1.5 py-0.5 rounded font-extrabold uppercase border border-red-100">Active</span>
                           )}
@@ -859,6 +915,35 @@ export default function AISettings({ user }: { user: User }) {
                       </div>
                       <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Official Google Gemini flash capabilities key binding.</p>
                     </div>
+
+                    {/* Claude */}
+                    <div className={`p-5 rounded-2xl border transition-all ${usesProvider('claude') ? 'border-[#7c1a1a] bg-red-50/15' : 'border-slate-100 bg-[#fafafa]'}`}>
+                      <div className="flex justify-between items-center mb-1.5">
+                        <label className="text-xs font-bold text-slate-700">Claude API Key</label>
+                        <div className="flex items-center gap-1.5">
+                          {usesProvider('claude') && (
+                            <span className="text-[9px] bg-red-50 text-[#7c1a1a] px-1.5 py-0.5 rounded font-extrabold uppercase border border-red-100">Active</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={showClaudeKey ? "text" : "password"}
+                          value={claudeKey}
+                          onChange={(e) => setClaudeKey(e.target.value)}
+                          placeholder={serverKeysConfig.claudeAvailable ? "Using key from environment (.env) - enter text to override" : "sk-ant-..."}
+                          className="w-full bg-white border border-slate-200 focus:border-[#7c1a1a] rounded-xl pl-4 pr-10 py-2.5 text-xs text-slate-800 focus:outline-none transition-all font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowClaudeKey(!showClaudeKey)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                        >
+                          {showClaudeKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Anthropic Claude direct API for AI Assistant (Sonnet, Haiku, Opus).</p>
+                    </div>
                   </div>
                 </div>
 
@@ -872,9 +957,6 @@ export default function AISettings({ user }: { user: User }) {
                       </span>
                       {bedrockCredentialsActive && (
                         <span className="text-[10px] bg-[#7c1a1a] text-white px-2.5 py-0.5 rounded-full font-extrabold uppercase tracking-wide">In Use</span>
-                      )}
-                      {serverKeysConfig.awsBedrockAvailable && (
-                        <span className="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-extrabold uppercase border border-emerald-100">● .env Default</span>
                       )}
                     </div>
                     <button
@@ -962,19 +1044,125 @@ export default function AISettings({ user }: { user: User }) {
                   </div>
                 </div>
 
-                {/* Autonomous AI Agents */}
-                <div className="p-6 rounded-3xl border border-slate-200 bg-[#fafafa] space-y-5">
-                  <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
-                    <div className="flex items-center gap-2">
-                      <Bot size={16} className="text-[#7c1a1a]" />
-                      <span className="text-xs font-black uppercase text-slate-700 tracking-wider">
-                        Autonomous AI Agents
-                      </span>
+                {/* LLM model selection — after API credentials */}
+                <div className="space-y-4">
+                  <h5 className="text-xs font-black uppercase text-slate-500 tracking-wider flex items-center gap-2">
+                    <BrainCircuit size={14} className="text-[#7c1a1a]" />
+                    LLM Model Selection
+                  </h5>
+
+                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-150 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                    <div>
+                      <label className="text-xs font-black uppercase text-slate-700 tracking-wider">
+                        AI Assistant Model
+                      </label>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Interactive chatbot — OpenAI, Groq, Gemini, Claude, or Bedrock models.
+                      </p>
                     </div>
-                    <span className="text-[9px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded font-extrabold uppercase">Phase 2</span>
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <select
+                          value={selectedModel}
+                          onChange={(e) => setSelectedModel(e.target.value)}
+                          className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 appearance-none focus:outline-none cursor-pointer pr-10"
+                        >
+                          {ASSISTANT_MODELS.map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                          <ChevronDown size={14} />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
+                        <Sparkles className="text-amber-500" size={12} />
+                        <span>Routing under </span>
+                        <span className="font-extrabold text-[#7c1a1a] uppercase">{assistantFamily}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-150 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                    <div>
+                      <label className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-1.5">
+                        <Bot size={14} className="text-[#7c1a1a]" />
+                        AI Agents Model
+                      </label>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Autonomous background agents — Bedrock-hosted models only.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <select
+                          value={agentSelectedModel}
+                          onChange={(e) => setAgentSelectedModel(e.target.value)}
+                          className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 appearance-none focus:outline-none cursor-pointer pr-10"
+                        >
+                          {AGENT_MODELS.map((m) => (
+                            <option key={`agent-${m}`} value={m}>{m}</option>
+                          ))}
+                        </select>
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                          <ChevronDown size={14} />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
+                        <Sparkles className="text-amber-500" size={12} />
+                        <span>Agents routing under </span>
+                        <span className="font-extrabold text-[#7c1a1a] uppercase">{agentFamily}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-8 py-4 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-2 text-[11px] text-slate-400 font-bold uppercase tracking-wide">
+                  <Lock size={12} className="text-[#7c1a1a]" />
+                  <span>Keys reside locally. No transmission outside model API targets.</span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <AnimatePresence>
+                    {modelSaveSuccess && (
+                      <motion.div
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0 }}
+                        className="text-xs text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 font-bold uppercase flex items-center gap-1.5"
+                      >
+                        <Check size={14} className="stroke-[3]" />
+                        Model Settings Saved!
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <button
+                    type="submit"
+                    className="bg-[#7c1a1a] text-white hover:bg-red-900 border border-[#7c1a1a] px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-md shadow-red-950/20 active:translate-y-px"
+                  >
+                    <Save size={14} />
+                    Save Model Settings
+                  </button>
+                </div>
+              </div>
+            </div>
+          </form>
+
+          <form onSubmit={handleSaveAgentSettings} className="space-y-6">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden">
+              <div className="p-8 space-y-5">
+                <div className="p-6 rounded-3xl border border-slate-200 bg-[#fafafa] space-y-5">
+                  <div className="flex items-center gap-2 border-b border-slate-200/60 pb-3">
+                    <Bot size={16} className="text-[#7c1a1a]" />
+                    <span className="text-xs font-black uppercase text-slate-700 tracking-wider">
+                      Autonomous AI Agents
+                    </span>
                   </div>
                   <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                    Background agents run on the AI Broker without human chat input. Agent scheduler wiring ships in the next build — save preferences here now.
+                    Background agents run on the server using local service identities. The chart updater writes to a shared agent activity log; the overnight nurse reviews vitals changes and messages assigned doctors.
                   </p>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -993,38 +1181,48 @@ export default function AISettings({ user }: { user: User }) {
                       <div className="space-y-1">
                         <label className="text-[10px] text-slate-500 font-bold uppercase">Interval (minutes)</label>
                         <input
-                          type="number"
-                          min={5}
-                          max={1440}
-                          value={agentChartUpdaterIntervalMin}
-                          onChange={(e) => setAgentChartUpdaterIntervalMin(Math.max(5, parseInt(e.target.value, 10) || 60))}
-                          className="w-full bg-[#fafafa] border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:border-[#7c1a1a] focus:outline-none"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={3}
+                          value={agentChartUpdaterIntervalInput}
+                          onChange={(e) => setAgentChartUpdaterIntervalInput(sanitizeIntervalDigits(e.target.value))}
+                          onBlur={() => {
+                            setAgentChartUpdaterIntervalInput(
+                              String(parseIntervalMinutes(agentChartUpdaterIntervalInput, 60))
+                            );
+                          }}
+                          className="w-full bg-[#fafafa] border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:border-[#7c1a1a] focus:outline-none [appearance:textfield]"
                         />
                       </div>
-                      <p className="text-[10px] text-slate-400 font-mono">Identity: agent_chart_updater (local)</p>
+                      <p className="text-[10px] text-slate-400 font-mono">Identity: aiagent1 (ChartUpdater Agent)</p>
                     </div>
 
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-slate-800">Overnight Triage Agent</label>
+                        <label className="text-xs font-bold text-slate-800">Overnight Nurse Agent</label>
                         <button
                           type="button"
-                          onClick={() => setAgentTriageEnabled(!agentTriageEnabled)}
-                          className={`relative w-11 h-6 rounded-full transition-colors ${agentTriageEnabled ? 'bg-[#7c1a1a]' : 'bg-slate-300'}`}
+                          onClick={() => setAgentOvernightNurseEnabled(!agentOvernightNurseEnabled)}
+                          className={`relative w-11 h-6 rounded-full transition-colors ${agentOvernightNurseEnabled ? 'bg-[#7c1a1a]' : 'bg-slate-300'}`}
                         >
-                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${agentTriageEnabled ? 'translate-x-5' : ''}`} />
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${agentOvernightNurseEnabled ? 'translate-x-5' : ''}`} />
                         </button>
                       </div>
-                      <p className="text-[10px] text-slate-400">Monitors vitals and sends AI-crafted alerts to assigned nurses and doctors.</p>
+                      <p className="text-[10px] text-slate-400">Reviews chart updater vitals changes and sends nurse-level analysis messages to assigned doctors.</p>
                       <div className="space-y-1">
                         <label className="text-[10px] text-slate-500 font-bold uppercase">Check interval (minutes)</label>
                         <input
-                          type="number"
-                          min={5}
-                          max={120}
-                          value={agentTriageIntervalMin}
-                          onChange={(e) => setAgentTriageIntervalMin(Math.max(5, parseInt(e.target.value, 10) || 20))}
-                          className="w-full bg-[#fafafa] border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:border-[#7c1a1a] focus:outline-none"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={3}
+                          value={agentOvernightNurseIntervalInput}
+                          onChange={(e) => setAgentOvernightNurseIntervalInput(sanitizeIntervalDigits(e.target.value))}
+                          onBlur={() => {
+                            setAgentOvernightNurseIntervalInput(
+                              String(parseIntervalMinutes(agentOvernightNurseIntervalInput, 20))
+                            );
+                          }}
+                          className="w-full bg-[#fafafa] border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:border-[#7c1a1a] focus:outline-none [appearance:textfield]"
                         />
                       </div>
                       <label className="flex items-center gap-2 text-[10px] text-slate-600 font-semibold cursor-pointer">
@@ -1036,7 +1234,7 @@ export default function AISettings({ user }: { user: User }) {
                         />
                         Night shift window only (19:00 – 07:00)
                       </label>
-                      <p className="text-[10px] text-slate-400 font-mono">Identity: agent_triage_nurse (local) · Duo mapping: pending</p>
+                      <p className="text-[10px] text-slate-400 font-mono">Identity: aiagent2 (Overnight Nurse Agent)</p>
                     </div>
                   </div>
                 </div>
@@ -1044,13 +1242,13 @@ export default function AISettings({ user }: { user: User }) {
 
               <div className="px-8 py-4 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-2 text-[11px] text-slate-400 font-bold uppercase tracking-wide">
-                  <Lock size={12} className="text-[#7c1a1a]" />
-                  <span>Keys reside locally. No transmission outside model API targets.</span>
+                  <Bot size={12} className="text-[#7c1a1a]" />
+                  <span>Agent activity is logged to agent_activity_log.json and the AI Agent Log tab.</span>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <AnimatePresence>
-                    {saveSuccess && (
+                    {agentSaveSuccess && (
                       <motion.div
                         initial={{ opacity: 0, x: 10 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -1058,7 +1256,7 @@ export default function AISettings({ user }: { user: User }) {
                         className="text-xs text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 font-bold uppercase flex items-center gap-1.5"
                       >
                         <Check size={14} className="stroke-[3]" />
-                        Settings Saved!
+                        Agent Settings Saved!
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -1068,12 +1266,13 @@ export default function AISettings({ user }: { user: User }) {
                     className="bg-[#7c1a1a] text-white hover:bg-red-900 border border-[#7c1a1a] px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-md shadow-red-950/20 active:translate-y-px"
                   >
                     <Save size={14} />
-                    Save Model Settings
+                    Save AI Agent Settings
                   </button>
                 </div>
               </div>
             </div>
           </form>
+          </>
         )}
 
         {/* Tab 2: Deployment Topology Grid */}

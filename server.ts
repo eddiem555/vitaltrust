@@ -16,12 +16,22 @@ import {
   getDefaultPasswordSha256,
   isDefaultPasswordConfigured,
   isSha256PasswordHash,
+  persistBootstrapPasswordHash,
+  validateDefaultPasswordPolicy,
 } from "./src/password-auth";
 import fs from "fs";
 import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
 import { ROLE_TOOLS, runMcpTool } from "./server-mcp-tools";
 import { executeBedrockChat } from "./server-bedrock";
+import { executeClaudeChat } from "./server-claude";
+import {
+  applyAgentConfigUpdate,
+  getAgentConfig,
+  initAgentScheduler,
+  loadAgentActivityLog,
+  type AgentRuntimeContext,
+} from "./server-agents";
 
 // ==========================================
 // SYSTEM CONSOLE LOGGING INTERCEPTOR
@@ -272,6 +282,22 @@ async function startServer() {
 
   // Execute immediate database backfill and save state
   backfillDb();
+
+  const defaultHashOnStartup = getDefaultPasswordSha256();
+  if (defaultHashOnStartup) {
+    let passwordSyncNeeded = false;
+    db_mock.users.forEach((user: any) => {
+      if (user.provider === "duo" && !user.password) return;
+      if (!user.password || user.password === "") {
+        user.password = defaultHashOnStartup;
+        passwordSyncNeeded = true;
+      }
+    });
+    if (passwordSyncNeeded) {
+      console.log("[VITALTRUST] Applied configured default password hash to users missing credentials.");
+    }
+  }
+
   savePersistedDb();
 
   // On change helper
@@ -284,6 +310,36 @@ async function startServer() {
         console.error(`[VITALTRUST] Error writing persistent_db.json:`, e);
       }
     }
+  }
+
+  const agentConfigPath = path.join(process.cwd(), "agent_config.json");
+  const agentActivityLogPath = path.join(process.cwd(), "agent_activity_log.json");
+  const agentRuntimeCtx: AgentRuntimeContext = {
+    db: db_mock,
+    savePersistedDb,
+    createLog: (userId, userName, role, activity, status, details) =>
+      createLog(userId, userName, role, activity, status, details),
+    sendMessage: (senderId, receiverId, content) => {
+      const sender = db_mock.users.find((u: any) => u.id === senderId);
+      const receiver = db_mock.users.find((u: any) => u.id === receiverId);
+      if (!sender || !receiver || !content?.trim()) return false;
+      if (!canSendMessage(sender.role, receiver.role)) return false;
+      db_mock.messages.push({
+        id: `msg${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        senderId,
+        receiverId,
+        content: content.trim(),
+        timestamp: new Date().toISOString(),
+      });
+      savePersistedDb();
+      return true;
+    },
+    configPath: agentConfigPath,
+    activityLogPath: agentActivityLogPath,
+  };
+
+  if (APP_ROLE === "aibroker" || IS_STANDALONE) {
+    initAgentScheduler(agentRuntimeCtx);
   }
 
   function normalizeAndSecureUrl(urlStr: string): string {
@@ -1562,6 +1618,45 @@ async function startServer() {
       res.json({ defaultPasswordConfigured: isDefaultPasswordConfigured() });
     });
 
+    app.post("/api/auth/bootstrap-default-password", (req, res) => {
+      if (isDefaultPasswordConfigured()) {
+        return res.status(409).json({ error: "Default credentials are already configured." });
+      }
+
+      const password = String(req.body?.password || "");
+      const policy = validateDefaultPasswordPolicy(password);
+      if (!policy.ok) {
+        return res.status(400).json({ error: policy.message });
+      }
+
+      try {
+        const hash = hashPassword(password);
+        persistBootstrapPasswordHash(hash);
+
+        let updatedUsers = 0;
+        db_mock.users.forEach((user: any) => {
+          if (user.provider === "duo" && !user.password) return;
+          user.password = hash;
+          updatedUsers++;
+        });
+        savePersistedDb();
+
+        createLog(
+          "system",
+          "Bootstrap Service",
+          "admin",
+          "Default Credentials Created",
+          "Success",
+          `Initial local user store password configured for ${updatedUsers} user(s). Login with username admin.`,
+          req
+        );
+
+        res.json({ success: true, message: "Default credentials created. Sign in with username admin and your new password." });
+      } catch (err: any) {
+        res.status(500).json({ error: err?.message || "Failed to save default credentials." });
+      }
+    });
+
     app.post("/api/auth/login", (req, res) => {
       if (!isDefaultPasswordConfigured()) {
         return res.status(503).json({
@@ -2279,6 +2374,7 @@ async function startServer() {
     app.get("/api/ai/config", (req, res) => {
       const geminiAvailable = !!process.env.GEMINI_API_KEY;
       const openaiAvailable = !!process.env.OPENAI_API_KEY;
+      const claudeAvailable = !!process.env.CLAUDE_API_KEY;
       const awsRegionAvailable = !!process.env.AWS_REGION;
       const awsAccessKeyAvailable = !!process.env.AWS_ACCESS_KEY;
       const awsSecretKeyAvailable = !!process.env.AWS_SECRET_KEY;
@@ -2294,12 +2390,35 @@ async function startServer() {
       res.json({
         geminiAvailable,
         openaiAvailable,
+        claudeAvailable,
         awsBedrockAvailable,
         awsRegion: awsRegionAvailable ? process.env.AWS_REGION : undefined,
         activeProvider,
         bootInstanceId: BOOT_INSTANCE_ID,
         version: VERSION,
       });
+    });
+
+    app.get("/api/agents/config", (req, res) => {
+      res.json(getAgentConfig());
+    });
+
+    app.get("/api/agents/activity-log", (req, res) => {
+      try {
+        const log = loadAgentActivityLog(agentActivityLogPath);
+        res.json({ success: true, ...log });
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err?.message || String(err) });
+      }
+    });
+
+    app.post("/api/agents/config", (req, res) => {
+      try {
+        const updated = applyAgentConfigUpdate(agentRuntimeCtx, req.body || {});
+        res.json({ success: true, config: updated });
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err?.message || String(err) });
+      }
     });
 
     // Provide a connectivity test check for Cisco AI Defense Settings
@@ -3521,7 +3640,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
       };
 
       // 2. --- Determine LLM Provider Family ---
-      let targetModelFamily: 'openai' | 'groq' | 'gemini' | 'bedrock' = 'openai';
+      let targetModelFamily: 'openai' | 'groq' | 'gemini' | 'claude' | 'bedrock' = 'openai';
 
       if (cleanedModel.includes('openai') || cleanedModel.startsWith('o3')) {
         targetModelFamily = 'openai';
@@ -3529,6 +3648,8 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
         targetModelFamily = 'groq';
       } else if (cleanedModel.includes('gemini')) {
         targetModelFamily = 'gemini';
+      } else if (cleanedModel.startsWith('claude -') || (cleanedModel.includes('claude-') && !cleanedModel.includes('bedrock'))) {
+        targetModelFamily = 'claude';
       } else if (cleanedModel.includes('bedrock')) {
         targetModelFamily = 'bedrock';
       }
@@ -3840,6 +3961,47 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             response: result.text,
             status: "Safe",
             provider: "gemini"
+          });
+
+        } else if (targetModelFamily === 'claude') {
+          const claudeKey = apiKeys?.claudeKey?.trim() || process.env.CLAUDE_API_KEY?.trim();
+          if (!claudeKey) {
+            throw new Error("Claude API Key is missing. Please enter it in AI Settings or set CLAUDE_API_KEY in .env.");
+          }
+
+          const formattedTools = activeTools.map((tName) => {
+            const t = (MCP_TOOLS_SPEC as any)[tName];
+            return {
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters,
+            };
+          });
+
+          const claudeResult = await executeClaudeChat({
+            apiKey: claudeKey,
+            modelName: targetModelName,
+            systemPrompt,
+            history: Array.isArray(history) ? history : [],
+            userMessage: message,
+            tools: formattedTools,
+            executeTool: async (name, parsedArgs) => executeMCPTool(name, parsedArgs, uId, uRole),
+          });
+
+          createLog(
+            uId,
+            uName,
+            uRole,
+            "AI Assistant Conversation",
+            "Success",
+            `[Claude - ${claudeResult.modelUsed}] Patient asked: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`,
+            req
+          );
+
+          return res.json({
+            response: claudeResult.text,
+            status: "Safe",
+            provider: "claude"
           });
 
         } else if (targetModelFamily === 'bedrock') {

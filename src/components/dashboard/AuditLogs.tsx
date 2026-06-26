@@ -13,7 +13,8 @@ import {
   User as UserIcon,
   Shield,
   Activity,
-  Server
+  Server,
+  Bot
 } from 'lucide-react';
 import { AuditLog } from '../../types';
 import { api } from '../../services/api';
@@ -28,11 +29,29 @@ export default function AuditLogs() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // System Console Logs State
-  const [activeTab, setActiveTab] = useState<'audit' | 'console'>('audit');
+  const [activeTab, setActiveTab] = useState<'audit' | 'console' | 'agents'>('audit');
   const [consoleLogs, setConsoleLogs] = useState<string>('');
   const [loadingConsole, setLoadingConsole] = useState(false);
   const [consoleAutoRefresh, setConsoleAutoRefresh] = useState(true);
   const [consoleSearch, setConsoleSearch] = useState('');
+  const [agentLogEntries, setAgentLogEntries] = useState<any[]>([]);
+  const [loadingAgentLog, setLoadingAgentLog] = useState(false);
+  const [agentLogSearch, setAgentLogSearch] = useState('');
+
+  const fetchAgentLogs = async () => {
+    setLoadingAgentLog(true);
+    try {
+      const res = await fetch('/api/agents/activity-log');
+      if (res.ok) {
+        const data = await res.json();
+        setAgentLogEntries(Array.isArray(data.entries) ? [...data.entries].reverse() : []);
+      }
+    } catch (err) {
+      console.error('Failed fetching agent activity log:', err);
+    } finally {
+      setLoadingAgentLog(false);
+    }
+  };
 
   const fetchConsoleLogs = async () => {
     setLoadingConsole(true);
@@ -98,6 +117,16 @@ export default function AuditLogs() {
     }, 30000); // Auto refresh every 30s
     return () => clearInterval(interval);
   }, [selectedNode]);
+
+  useEffect(() => {
+    if (activeTab === 'agents') {
+      fetchAgentLogs();
+      const interval = setInterval(() => {
+        fetchAgentLogs();
+      }, 15000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === 'console') {
@@ -199,9 +228,20 @@ export default function AuditLogs() {
           <Server size={14} />
           SYSTEM CONSOLE LOGS (SERVER OUTPUT)
         </button>
+        <button
+          onClick={() => setActiveTab('agents')}
+          className={`flex items-center gap-2 px-6 py-3 border-b-2 font-black tracking-wider text-xs transition-all ${
+            activeTab === 'agents'
+              ? 'border-red-600 text-red-600 bg-red-50/20'
+              : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <Bot size={14} />
+          AI AGENT LOG
+        </button>
       </div>
 
-      {activeTab === 'audit' ? (
+      {activeTab === 'audit' && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
         <div className="col-span-12 md:col-span-6 relative">
@@ -414,7 +454,9 @@ export default function AuditLogs() {
         </div>
       </div>
       </>
-      ) : (
+      )}
+
+      {activeTab === 'console' && (
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-850 p-5 rounded-2xl shadow-sm">
             <div className="flex flex-wrap items-center gap-4">
@@ -496,6 +538,99 @@ export default function AuditLogs() {
           </div>
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">
             Active Workspace Path: /system_console.log • Pulls last 1500 lines for high performance
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'agents' && (
+        <div className="space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white border border-slate-100 p-5 rounded-2xl shadow-sm">
+            <div className="relative w-full md:w-96">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input
+                type="text"
+                placeholder="Search agent activity, patients, vitals..."
+                value={agentLogSearch}
+                onChange={(e) => setAgentLogSearch(e.target.value)}
+                className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-red-600/20 focus:border-red-600 transition-all text-sm"
+              />
+            </div>
+            <button
+              onClick={fetchAgentLogs}
+              disabled={loadingAgentLog}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-lg shadow-red-500/20 transition-all disabled:opacity-50 font-bold text-sm"
+            >
+              <RefreshCcw size={16} className={loadingAgentLog ? 'animate-spin' : ''} />
+              REFRESH
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            {loadingAgentLog && agentLogEntries.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-100 p-16 text-center">
+                <RefreshCcw className="text-red-400 animate-spin mx-auto mb-3" size={28} />
+                <p className="text-slate-400 font-medium">Loading agent activity log...</p>
+              </div>
+            ) : agentLogEntries.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-100 p-16 text-center">
+                <Bot className="text-slate-300 mx-auto mb-3" size={32} />
+                <p className="text-slate-500 font-medium">No agent activity recorded yet.</p>
+                <p className="text-slate-400 text-sm mt-1">Enable the Chart Updater agent in AI Settings to begin logging.</p>
+              </div>
+            ) : (
+              agentLogEntries
+                .filter((entry) => {
+                  if (!agentLogSearch.trim()) return true;
+                  const haystack = JSON.stringify(entry).toLowerCase();
+                  return haystack.includes(agentLogSearch.toLowerCase());
+                })
+                .map((entry) => (
+                  <div key={entry.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/60 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Bot size={16} className="text-[#7c1a1a]" />
+                          <span className="text-sm font-bold text-slate-900">{entry.activity}</span>
+                          <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100">
+                            {entry.agentName}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1 font-mono">{new Date(entry.timestamp).toLocaleString()}</p>
+                      </div>
+                      <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full border ${
+                        entry.overnightNurseStatus === 'processed'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                          : 'bg-amber-50 text-amber-700 border-amber-100'
+                      }`}>
+                        Overnight Nurse: {entry.overnightNurseStatus || 'pending'}
+                      </span>
+                    </div>
+                    <div className="px-6 py-4 space-y-4">
+                      <p className="text-sm text-slate-700 leading-relaxed">{entry.summary}</p>
+                      {entry.patients?.map((p: any) => (
+                        <div key={`${entry.id}-${p.patientId}`} className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                          <p className="text-xs font-bold text-slate-800">{p.patientName} ({p.patientId})</p>
+                          <p className="text-[11px] text-slate-500 mt-1">
+                            HR {p.vitalsBefore?.hr} → {p.vitalsAfter?.hr} · Temp {p.vitalsBefore?.temp}°F → {p.vitalsAfter?.temp}°F · BP {p.vitalsBefore?.bp} → {p.vitalsAfter?.bp}
+                          </p>
+                          <p className="text-[11px] text-slate-600 mt-2 italic">{p.chartNote}</p>
+                        </div>
+                      ))}
+                      {entry.narrative && (
+                        <details className="text-xs">
+                          <summary className="cursor-pointer font-bold text-slate-500 uppercase tracking-wider">Full narrative (agent-readable)</summary>
+                          <pre className="mt-2 whitespace-pre-wrap text-slate-600 bg-slate-50 rounded-xl p-4 border border-slate-100 font-mono text-[11px] leading-relaxed">
+                            {entry.narrative}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  </div>
+                ))
+            )}
+          </div>
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">
+            Active Workspace Path: /agent_activity_log.json • Shared handoff between chart updater and overnight nurse agents
           </div>
         </div>
       )}

@@ -25,7 +25,7 @@ export interface Patient {
 
 export interface User {
   id: string;
-  role: 'admin' | 'patient' | 'nurse' | 'doctor';
+  role: 'admin' | 'patient' | 'nurse' | 'doctor' | 'aiagent';
   realName: string;
   email?: string;
   phone?: string;
