@@ -252,7 +252,7 @@ export default function App() {
                 </div>
                 <div className="text-left hidden sm:block">
                   <p className="text-sm font-bold text-slate-900 leading-none">{user.realName}</p>
-                  <p className="text-[10px] text-slate-500 font-medium mt-1 leading-none">({user.id})</p>
+                  <p className="text-[12px] text-slate-500 font-medium mt-1 leading-none">({user.id})</p>
                 </div>
                 <ChevronDown size={16} className={`text-slate-400 transition-transform ${showUserDropdown ? 'rotate-180' : ''}`} />
               </button>
