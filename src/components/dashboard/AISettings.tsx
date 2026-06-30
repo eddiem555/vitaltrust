@@ -1727,9 +1727,11 @@ export default function AISettings({ user }: { user: User }) {
                     >
                       <motion.div layout className="w-4 h-4 rounded-full bg-white shadow-md cursor-pointer" />
                     </button>
-                    <span className="text-[10px] text-slate-400 font-bold block text-right mt-1">
-                      {aiDefenseEnabled ? "Route active via Cisco Portal" : "Bypass security / Send direct"}
-                    </span>
+                    {!aiDefenseEnabled && (
+                      <span className="text-[10px] text-slate-400 font-bold block text-right mt-1">
+                        Bypass security / Send direct
+                      </span>
+                    )}
                   </div>
                 </div>
 

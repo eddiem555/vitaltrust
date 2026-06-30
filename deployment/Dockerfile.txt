@@ -29,6 +29,11 @@ FROM node:20-slim
 
 WORKDIR /app
 
+# curl for in-container health checks (e.g. /api/mcp/status, /mcp probe)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set production environment
 ENV NODE_ENV=production
 ENV PORT=3000

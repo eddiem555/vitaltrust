@@ -260,6 +260,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
           aiDefenseGateway: localStorage.getItem('vt_ai_defense_gateway') || 'https://us.api.inspect.aidefense.security.cisco.com',
           aiDefenseApiKey: localStorage.getItem('vt_ai_defense_api_key') || '',
           aiDefensePromptSource: localStorage.getItem('vt_ai_defense_prompt_source') || 'server',
+          aiDefenseMode: localStorage.getItem('vt_ai_defense_mode') || 'Via API',
           aiDefenseRules: (() => {
             const rulesStr = localStorage.getItem('vt_ai_defense_rules');
             if (rulesStr) {

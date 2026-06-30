@@ -239,7 +239,7 @@ export default function App() {
             <img 
               src="/cdwlogo.jpg" 
               alt="Cisco Partner / CDW" 
-              className="h-10 w-auto object-contain rounded-lg border border-slate-200/50 shadow-sm" 
+              className="h-14 w-auto object-contain rounded-lg border border-slate-200/50 shadow-sm" 
               referrerPolicy="no-referrer"
             />
             <div className="relative">
@@ -252,6 +252,7 @@ export default function App() {
                 </div>
                 <div className="text-left hidden sm:block">
                   <p className="text-sm font-bold text-slate-900 leading-none">{user.realName}</p>
+                  <p className="text-[10px] text-slate-500 font-medium mt-1 leading-none">({user.id})</p>
                 </div>
                 <ChevronDown size={16} className={`text-slate-400 transition-transform ${showUserDropdown ? 'rotate-180' : ''}`} />
               </button>

@@ -22,6 +22,7 @@ docker compose -f deployment/docker-compose.yml up
 ```
 
 ## Security Testing Scenarios
+- **Cisco Secure Access (MCP)**: Register the standalone host private IP and port `3000` in **Resources → AI Resources**. Secure Access probes `http://<host>:3000/mcp` for tool discovery. Clients use the public AIGW URL ending in `/mcp`. Check `GET /api/mcp/status` for tool count.
 - **Cisco Secure Workload**: Configure micro-segmentation to allow traffic ONLY between `appserver` and `dbserver` on port 3000.
 - **Cisco Secure Access (ZTNA)**: Deploy `appserver` and require authenticated access via ZTNA connector.
 - **Cisco Duo**: The `appserver` host is the primary integration point for SAML/OIDC identity logic.
