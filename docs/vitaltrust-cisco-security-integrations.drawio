@@ -1,0 +1,137 @@
+<mxfile host="app.diagrams.net" modified="2026-07-20T16:52:00.000Z" agent="Cursor" version="24.7.17" type="device">
+  <diagram id="vitaltrust-cisco-security" name="VitalTrust Cisco Security">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="780" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Background zones (visual only — all nodes on layer 1 for clean edge routing) -->
+        <mxCell id="zone-identity" value="IDENTITY + ZTNA PERIMETER" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="40" y="110" width="520" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="zone-vt" value="VITALTRUST APPLICATION TIER" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="40" y="330" width="520" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="zone-mcp" value="SECURE ACCESS MCP CONTROLS" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="590" y="210" width="260" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="zone-aid" value="AI ASSISTANT GUARDRAILS" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="590" y="430" width="260" height="240" as="geometry" />
+        </mxCell>
+
+        <!-- Users -->
+        <mxCell id="user-browser" value="&lt;b&gt;Clinical User&lt;/b&gt;&lt;br&gt;Browser" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="220" y="30" width="160" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="user-mcp" value="&lt;b&gt;External MCP Client&lt;/b&gt;&lt;br&gt;e.g. Cursor IDE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="640" y="30" width="180" height="56" as="geometry" />
+        </mxCell>
+
+        <!-- Cisco Duo -->
+        <mxCell id="duo" value="&lt;b&gt;Cisco Duo&lt;/b&gt;&lt;br&gt;OIDC SSO · MFA · Groups → Role" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="190" y="140" width="220" height="56" as="geometry" />
+        </mxCell>
+
+        <!-- Secure Access ZTNA -->
+        <mxCell id="sa-ztna" value="&lt;b&gt;Cisco Secure Access&lt;/b&gt;&lt;br&gt;ZTNA Resource Connector" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="190" y="230" width="220" height="56" as="geometry" />
+        </mxCell>
+
+        <!-- VitalTrust nodes -->
+        <mxCell id="vt-app" value="&lt;b&gt;VitalTrust appserver&lt;/b&gt;&lt;br&gt;React UI · /api/auth · proxy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="190" y="360" width="220" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="vt-db" value="&lt;b&gt;VitalTrust dbserver&lt;/b&gt;&lt;br&gt;EHR CRUD · persistent_db.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="60" y="450" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="vt-ai" value="&lt;b&gt;VitalTrust aibroker&lt;/b&gt;&lt;br&gt;/api/ai/chat · MCP executor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="340" y="450" width="200" height="56" as="geometry" />
+        </mxCell>
+
+        <!-- Secure Access MCP -->
+        <mxCell id="sa-aigw" value="&lt;b&gt;Secure Access AIGW&lt;/b&gt;&lt;br&gt;Public URL …/mcp · tool policy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="620" y="250" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="vt-mcp" value="&lt;b&gt;POST /mcp&lt;/b&gt;&lt;br&gt;tools/list · tools/call" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="620" y="330" width="200" height="56" as="geometry" />
+        </mxCell>
+
+        <!-- AI Defense -->
+        <mxCell id="aid" value="&lt;b&gt;Cisco AI Defense&lt;/b&gt;&lt;br&gt;Inspect API · policy rules" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="620" y="470" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="llm" value="&lt;b&gt;LLM Providers&lt;/b&gt;&lt;br&gt;OpenAI · Gemini · Groq" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="620" y="550" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="block" value="&lt;b&gt;POLICY VIOLATION&lt;/b&gt;&lt;br&gt;blocked response" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="860" y="470" width="180" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- Edges: identity path -->
+        <mxCell id="e1" value="login" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="user-browser" target="duo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="authenticated session" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="duo" target="sa-ztna">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="HTTPS :3000" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="sa-ztna" target="vt-app">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Edges: VitalTrust tier -->
+        <mxCell id="e4" value="/api/dbserver" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="vt-app" target="vt-db">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="/api/ai/chat" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="vt-app" target="vt-ai">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Edges: MCP path -->
+        <mxCell id="e6" value="MCP client" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;dashed=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="user-mcp" target="sa-aigw">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="sa-aigw" target="vt-mcp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="tools/call → EHR" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;dashed=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="vt-mcp" target="vt-db">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="580" y="358" />
+              <mxPoint x="580" y="478" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Edges: AI Defense path -->
+        <mxCell id="e9" value="pre-scan" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="vt-ai" target="aid">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="pass → LLM" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="aid" target="llm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="block" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#b85450;dashed=1;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="aid" target="block">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="function calling" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;dashed=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.75;entryDx=0;entryDy=0;" edge="1" parent="1" source="llm" target="vt-ai">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="560" y="578" />
+              <mxPoint x="560" y="492" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e13" value="MCP tools → db" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#333333;dashed=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="vt-ai" target="vt-db">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Legend -->
+        <mxCell id="legend" value="&lt;b&gt;Legend&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Blue = Cisco security products&lt;br&gt;Green = VitalTrust nodes&lt;br&gt;Yellow = users / external LLMs&lt;br&gt;Purple = data store&lt;br&gt;Solid = primary path · Dashed = tool / fallback path&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="560" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="notes" value="&lt;b&gt;VitalTrust touchpoints&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Duo: /api/auth/duo/url, /api/auth/callback&lt;br&gt;Secure Access: ZTNA connector + POST /mcp (mcp-http-server.ts)&lt;br&gt;AI Defense: /api/v1/inspect/chat before /api/ai/chat&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="340" y="560" width="320" height="110" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
