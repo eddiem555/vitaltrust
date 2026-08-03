@@ -29,6 +29,7 @@ import {
 import { User } from './types';
 import { api } from './services/api';
 import { VERSION, VERSION_DATE } from './version';
+import { syncClientStorageWithBootInstance } from './client-boot-sync';
 
 // Components
 import Login from './components/auth/Login';
@@ -49,6 +50,26 @@ export default function App() {
   const [passwordSuccess, setPasswordSuccess] = useState('');
 
   const [systemConfig, setSystemConfig] = useState<{ mode: string; role: string } | null>(null);
+  const [bootSyncReady, setBootSyncReady] = useState(false);
+
+  // Reset browser localStorage settings when the server reports a new boot instance (fresh deploy).
+  useEffect(() => {
+    fetch('/api/ai/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.bootInstanceId) {
+          const didReset = syncClientStorageWithBootInstance(data.bootInstanceId);
+          if (didReset) {
+            console.info('[VitalTrust] New server boot instance — client settings reset to defaults.');
+          }
+        }
+        setBootSyncReady(true);
+      })
+      .catch((err) => {
+        console.error('Boot sync failed:', err);
+        setBootSyncReady(true);
+      });
+  }, []);
 
   // Fetch dynamic system config to check if this node is running as a restricted child node
   useEffect(() => {
@@ -152,6 +173,14 @@ export default function App() {
       setPasswordError("Failed to connect to authentication service.");
     }
   };
+
+  if (!bootSyncReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500 text-sm font-medium">
+        Initializing Vital Trust…
+      </div>
+    );
+  }
 
   if (!user) {
     return <Login onLogin={handleLogin} />;

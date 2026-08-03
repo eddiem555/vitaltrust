@@ -88,9 +88,18 @@ export const MCP_TOOLS_SPEC: McpToolsSpecMap = {
       required: []
     }
   },
+  get_my_assigned_patients: {
+    name: "get_my_assigned_patients",
+    description: "List patients assigned to the logged-in nurse or doctor (server-filtered by care-team assignment). Use for 'my patients', 'assigned to me', or 'my caseload' — not get_ward_roster.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: []
+    }
+  },
   get_ward_roster: {
     name: "get_ward_roster",
-    description: "Get the clinical roster of all active, inactive, discharged, triage, or general patients registered in the clinic or ward.",
+    description: "Get the full clinical roster of all patients in the clinic (all care teams). For the logged-in clinician's own assigned patients, use get_my_assigned_patients instead.",
     parameters: {
       type: "object",
       properties: {},

@@ -51,15 +51,6 @@ ${examples}
 * "Tell me how AI works in a few of paragraphs."`;
 };
 
-function clearAllAiChatHistory() {
-  const keysToRemove: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key?.startsWith('vt_ai_chat_')) keysToRemove.push(key);
-  }
-  keysToRemove.forEach((key) => localStorage.removeItem(key));
-}
-
 export default function VitalTrustAIChatbot({ user }: { user: User; key?: string }) {
   // Load configuration from localStorage
   const [selectedModel, setSelectedModel] = useState<string>('OpenAI GPT-5');
@@ -91,7 +82,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   const [chatBootSynced, setChatBootSynced] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Load initially on mount — sync boot id so redeploys clear stale browser chat history
+  // Load initially on mount (client settings synced at App boot via boot instance id)
   useEffect(() => {
     const storedModel = localStorage.getItem('vt_ai_selected_model') || 'OpenAI GPT-5';
     if (storedModel.toLowerCase().includes('bedrock')) {
@@ -129,14 +120,6 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
             claudeAvailable: !!data.claudeAvailable,
             activeProvider: data.activeProvider || 'local'
           });
-          const bootId = data.bootInstanceId as string | undefined;
-          if (bootId) {
-            const storedBootId = localStorage.getItem('vt_boot_instance_id');
-            if (storedBootId !== bootId) {
-              clearAllAiChatHistory();
-              localStorage.setItem('vt_boot_instance_id', bootId);
-            }
-          }
         }
         setChatBootSynced(true);
       })
@@ -257,7 +240,14 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
           userName: user.realName,
           userRole: user.role,
           aiDefenseEnabled: aiDefenseEnabled,
-          aiDefenseGateway: localStorage.getItem('vt_ai_defense_gateway') || 'https://us.api.inspect.aidefense.security.cisco.com',
+          aiDefenseGateway:
+            localStorage.getItem('vt_ai_defense_gateway') ||
+            localStorage.getItem('vt_ai_defense_proxy_url') ||
+            'https://us.api.inspect.aidefense.security.cisco.com',
+          aiDefenseGatewayUrl:
+            localStorage.getItem('vt_ai_defense_proxy_url') ||
+            localStorage.getItem('vt_ai_defense_gateway') ||
+            '',
           aiDefenseApiKey: localStorage.getItem('vt_ai_defense_api_key') || '',
           aiDefensePromptSource: localStorage.getItem('vt_ai_defense_prompt_source') || 'server',
           aiDefenseMode: localStorage.getItem('vt_ai_defense_mode') || 'Via API',

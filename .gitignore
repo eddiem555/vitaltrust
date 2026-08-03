@@ -5,6 +5,10 @@
 
 # Persistent file database
 persistent_db.json
+deployment_config.json
+boot_instance.id
+duo_sso_config.json
+system_console.log
 local_auth_config.json
 
 # Dependencies

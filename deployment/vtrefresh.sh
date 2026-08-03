@@ -3,13 +3,8 @@
 docker stop vitaltrust-app
 docker rm vitaltrust-app
 
-if [ ! -f /home/ubuntu/.env ] ; then
-  echo "Error: Missing Vital Trust .env file!"
-  echo "/home/ubuntu/.env not found" && exit 1
-fi
-
 if [ -f /tmp/vitaltrust.zip ] ; then
-  sudo rm -rf /tmp/vitaltrust
+  rm -rf /tmp/vitaltrust
   mkdir /tmp/vitaltrust
   cd /tmp && unzip /tmp/vitaltrust.zip
 else
@@ -28,6 +23,14 @@ rm -f /tmp/vitaltrust.zip
 rm -f /tmp/vitaltrust/persistent_db.json
 rm -f /tmp/vitaltrust/deployment_config.json
 rm -f /tmp/vitaltrust/system_console.log
+rm -f /tmp/vitaltrust/boot_instance.id
+rm -f /tmp/vitaltrust/duo_sso_config.json
+rm -f /tmp/vitaltrust/local_auth_config.json
 
-cp /home/ubuntu/.env /tmp/vitaltrust
+if [ ! -f ~/.env ] ; then
+  echo "Warning: Vital Trust .env not found. Initial password must be set from web UI"
+else
+  cp ~/.env /tmp/vitaltrust
+fi
+
 bash /tmp/vitaltrust/deployment/DeployVitalTrust.sh

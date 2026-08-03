@@ -9,6 +9,7 @@ import {
   Filter
 } from 'lucide-react';
 import { User as UserType } from '../../types';
+import { getMcpToolResponseSample } from '../../mcp-tool-response-samples';
 
 interface DocumentationProps {
   user: UserType;
@@ -236,12 +237,20 @@ export default function Documentation({ user }: DocumentationProps) {
       securityImpact: "Credential change via auth API; audited."
     },
     {
+      name: "get_my_assigned_patients",
+      description: "List patients assigned to the logged-in nurse or doctor (server-filtered by care-team assignment).",
+      role: "nurse",
+      parameters: {},
+      samplePayload: {},
+      securityImpact: "Preferred tool for 'my patients' / 'assigned to me'. Returns id, name, status, and care-team fields only — not full charts. Admin accounts should use get_ward_roster instead."
+    },
+    {
       name: "get_ward_roster",
       description: "Get the clinical patient roster with care-team assignments and triage flags.",
       role: "nurse",
       parameters: {},
       samplePayload: {},
-      securityImpact: "Nurses should filter to assignedNurseId when user asks about 'my patients'."
+      securityImpact: "Full clinic roster (~51 patients). Use get_my_assigned_patients when the user asks about their own caseload."
     },
     {
       name: "get_patient_vitals",
@@ -264,7 +273,7 @@ export default function Documentation({ user }: DocumentationProps) {
         bp: { type: "string", description: "Blood pressure (e.g. 120/80).", required: true }
       },
       samplePayload: { patientId: "patient2", hr: "72", temp: "98.4", bp: "118/75" },
-      securityImpact: "Clinical write; available to nurses, doctors, and admins."
+      securityImpact: "Clinical write; available to nurses, doctors, and admins. Returns vitals confirmation only (patientId + vitals) — not the full patient chart — to reduce PHI on the LLM wire."
     },
     {
       name: "get_medication_tasks",
@@ -476,6 +485,7 @@ export default function Documentation({ user }: DocumentationProps) {
   });
 
   const selectedToolObj = mcpTools.find(tool => tool.name === selectedTool) || mcpTools[0];
+  const selectedToolResponse = getMcpToolResponseSample(selectedToolObj.name);
 
   const getRoleBadgeColor = (role: string) => {
     switch(role) {
@@ -672,13 +682,14 @@ export default function Documentation({ user }: DocumentationProps) {
                       </div>
                     </div>
 
-                    {/* Code Sample Block */}
-                    <div className="p-6 bg-slate-900 border-t border-slate-800">
-                      <div className="flex items-center justify-between text-xs text-white/50 mb-3 font-mono">
-                        <span>Schema & Sample Call Response</span>
-                        <span className="px-2 py-0.5 bg-white/5 rounded text-[10px]">JSON Schema</span>
-                      </div>
-                      <pre className="text-emerald-400 font-mono text-[11px] p-4 bg-black/60 rounded-xl overflow-x-auto scrollbar-thin leading-relaxed">
+                    {/* Sample tool call + response (for Gateway / MCP troubleshooting) */}
+                    <div className="p-6 bg-slate-900 border-t border-slate-800 space-y-6">
+                      <div>
+                        <div className="flex items-center justify-between text-xs text-white/50 mb-3 font-mono">
+                          <span>Sample Tool Call (request)</span>
+                          <span className="px-2 py-0.5 bg-white/5 rounded text-[10px]">MCP invoke</span>
+                        </div>
+                        <pre className="text-emerald-400 font-mono text-[11px] p-4 bg-black/60 rounded-xl overflow-x-auto scrollbar-thin leading-relaxed">
 {JSON.stringify({
   toolCall: selectedToolObj.name,
   arguments: selectedToolObj.samplePayload,
@@ -688,7 +699,25 @@ export default function Documentation({ user }: DocumentationProps) {
     authorizedOverOidc: true
   }
 }, null, 2)}
-                      </pre>
+                        </pre>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between text-xs text-white/50 mb-3 font-mono">
+                          <span>Sample Tool Response (return payload)</span>
+                          <span className="px-2 py-0.5 bg-amber-500/10 text-amber-300/80 rounded text-[10px]">Sent to LLM</span>
+                        </div>
+                        {selectedToolResponse.phiNote && (
+                          <p className="text-[10px] text-amber-200/70 mb-2 leading-relaxed">
+                            {selectedToolResponse.phiNote}
+                          </p>
+                        )}
+                        <pre className="text-sky-300 font-mono text-[11px] p-4 bg-black/60 rounded-xl overflow-x-auto scrollbar-thin leading-relaxed">
+{JSON.stringify(selectedToolResponse.sample, null, 2)}
+                        </pre>
+                        <p className="text-[10px] text-white/40 mt-2 leading-relaxed">
+                          In Defense Gateway mode, this JSON is included in the chat completion payload after tool execution. Cisco AI Defense scans it for policy violations (PII, prompt injection, etc.).
+                        </p>
+                      </div>
                     </div>
                   </div>
                 ) : (

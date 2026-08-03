@@ -1,17 +1,22 @@
 import { Sha256 } from "@aws-crypto/sha256-js";
 import { HttpRequest } from "@smithy/protocol-http";
 import { SignatureV4 } from "@smithy/signature-v4";
+import { Agent, request as undiciRequest } from "undici";
+import tls from "node:tls";
 import {
   getBedrockModelIdCandidates,
   migrateEolBedrockModelId,
   stripBedrockUiPrefix,
 } from "./src/bedrock-models";
+import { parseDefenseGatewayPolicyBlock } from "./server-ai-defense";
 
 export interface BedrockCredentials {
   accessKeyId: string;
   secretAccessKey: string;
   region: string;
   customDns?: string;
+  /** When set, signed Bedrock requests POST to this Cisco Defense Gateway URL. */
+  defenseGatewayUrl?: string;
 }
 
 export interface BedrockToolSpec {
@@ -28,6 +33,14 @@ export interface BedrockChatOptions {
   userMessage: string;
   tools?: BedrockToolSpec[];
   executeTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+}
+
+export interface BedrockChatResult {
+  text: string;
+  modelUsed: string;
+  blocked?: boolean;
+  blockReason?: string;
+  routedVia?: "bedrock-direct" | "cisco-defense-gateway";
 }
 
 function resolveHostname(region: string, customDns?: string): string {
@@ -72,6 +85,100 @@ function isRetryableBedrockError(status: number, detail: string): boolean {
   );
 }
 
+const CISCO_GATEWAY_TLS_PREFIXES = [
+  "https://us.gateway.aidefense",
+  "https://eu.gateway.aidefense",
+  "https://ap.gateway.aidefense",
+];
+
+/**
+ * Bedrock gateway requests sign HTTP Host as bedrock-runtime.*.amazonaws.com (SigV4)
+ * but TLS connects to us.gateway.aidefense.*. Always pin SNI/cert checks to the gateway host.
+ */
+function createDefenseGatewayDispatcher(gatewayUrl: string): Agent {
+  const tlsServername = new URL(gatewayUrl).hostname;
+  const isKnownCiscoGateway = CISCO_GATEWAY_TLS_PREFIXES.some((prefix) =>
+    gatewayUrl.startsWith(prefix)
+  );
+
+  return new Agent({
+    connect: {
+      servername: tlsServername,
+      rejectUnauthorized: isKnownCiscoGateway,
+      ...(isKnownCiscoGateway
+        ? {
+            checkServerIdentity(_host: string, cert: tls.PeerCertificate) {
+              return tls.checkServerIdentity(tlsServername, cert);
+            },
+          }
+        : {}),
+    },
+  });
+}
+
+function flattenSignedHeaders(
+  headers: Record<string, string | string[] | undefined>
+): Record<string, string> {
+  const flat: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    flat[key] = Array.isArray(value) ? value.join(", ") : String(value);
+  }
+  return flat;
+}
+
+function resolveSignedBody(signedBody: unknown, fallback: string): string {
+  if (typeof signedBody === "string") return signedBody;
+  if (signedBody instanceof Uint8Array) return Buffer.from(signedBody).toString("utf8");
+  return fallback;
+}
+
+/** CogniSphere pattern: undici fetch to gateway URL with SigV4 headers (Host = bedrock-runtime). */
+async function postViaDefenseGateway(
+  apiUrl: string,
+  gatewayUrl: string,
+  signedMethod: string,
+  signedHeaders: Record<string, string | string[] | undefined>,
+  signedBody: unknown,
+  fallbackBody: string,
+  timeoutMs: number
+): Promise<{ status: number; headers: Record<string, string>; body: string }> {
+  const dispatcher = createDefenseGatewayDispatcher(gatewayUrl);
+  const body = resolveSignedBody(signedBody, fallbackBody);
+  const headers = flattenSignedHeaders(signedHeaders);
+
+  let statusCode: number;
+  let responseHeaders: Record<string, string>;
+  let responseBody: string;
+
+  try {
+    const result = await undiciRequest(apiUrl, {
+      method: signedMethod,
+      headers,
+      body,
+      dispatcher,
+      headersTimeout: timeoutMs,
+      bodyTimeout: timeoutMs,
+    });
+    statusCode = result.statusCode;
+    responseHeaders = {};
+    for (const [key, value] of Object.entries(result.headers)) {
+      if (typeof value === "string") responseHeaders[key] = value;
+      else if (Array.isArray(value)) responseHeaders[key] = value.join(", ");
+    }
+    responseBody = await result.body.text();
+  } catch (err: any) {
+    const detail = err?.cause?.message || err?.message || String(err);
+    throw new Error(`Bedrock gateway request failed: ${detail}`);
+  }
+
+  return {
+    status: statusCode,
+    headers: responseHeaders,
+    body: responseBody,
+  };
+}
+
 async function converseOnce(
   credentials: BedrockCredentials,
   modelId: string,
@@ -80,6 +187,7 @@ async function converseOnce(
   const hostname = resolveHostname(credentials.region, credentials.customDns);
   const path = `/model/${modelId}/converse`;
   const bodyStr = JSON.stringify(body);
+  const gatewayUrl = (credentials.defenseGatewayUrl || "").trim();
 
   const signer = new SignatureV4({
     service: "bedrock",
@@ -91,44 +199,80 @@ async function converseOnce(
     sha256: Sha256,
   });
 
+  const requestHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+    accept: "application/json",
+    Host: hostname,
+    "Content-Length": String(Buffer.byteLength(bodyStr, "utf8")),
+  };
+  if (gatewayUrl) {
+    requestHeaders["x-amzn-bedrock-accept-type"] = "application/json";
+  }
+
   const request = new HttpRequest({
     method: "POST",
     protocol: "https:",
     hostname,
     path,
-    headers: {
-      "Content-Type": "application/json",
-      accept: "application/json",
-      Host: hostname,
-    },
+    headers: requestHeaders,
     body: bodyStr,
   });
 
   const signedRequest = await signer.sign(request);
-  const apiUrl = `https://${hostname}${path}`;
+  const apiUrl = gatewayUrl
+    ? `${gatewayUrl.replace(/\/+$/, "")}${path}`
+    : `https://${hostname}${path}`;
 
-  console.log(`[AI_BROKER] [BEDROCK_FETCH] Outgoing fetch to: [${apiUrl}]. Model: "${modelId}".`);
+  console.log(
+    `[AI_BROKER] [BEDROCK_FETCH] Outgoing fetch to: [${apiUrl}]. Model: "${modelId}". Gateway: ${gatewayUrl ? "yes" : "no"}.`
+  );
 
-  const response = await fetch(apiUrl, {
-    method: signedRequest.method,
-    headers: signedRequest.headers as Record<string, string>,
-    body: signedRequest.body,
-    signal: AbortSignal.timeout(120000),
-  });
+  let status: number;
+  let payload: unknown;
 
-  const contentType = response.headers.get("content-type") || "";
-  const payload =
-    contentType.includes("application/json")
-      ? await response.json()
-      : { message: await response.text() };
+  if (gatewayUrl) {
+    const gatewayRes = await postViaDefenseGateway(
+      apiUrl,
+      gatewayUrl,
+      signedRequest.method,
+      signedRequest.headers as Record<string, string | string[] | undefined>,
+      signedRequest.body,
+      bodyStr,
+      120000
+    );
+    status = gatewayRes.status;
+    const contentType = gatewayRes.headers["content-type"] || "";
+    if (contentType.includes("application/json")) {
+      try {
+        payload = JSON.parse(gatewayRes.body || "{}");
+      } catch {
+        payload = { message: gatewayRes.body };
+      }
+    } else {
+      payload = { message: gatewayRes.body };
+    }
+  } else {
+    const response = await fetch(apiUrl, {
+      method: signedRequest.method,
+      headers: signedRequest.headers as Record<string, string>,
+      body: signedRequest.body,
+      signal: AbortSignal.timeout(120000),
+    });
+    status = response.status;
+    const contentType = response.headers.get("content-type") || "";
+    payload =
+      contentType.includes("application/json")
+        ? await response.json()
+        : { message: await response.text() };
+  }
 
-  if (!response.ok) {
+  if (!status || status < 200 || status >= 300) {
     const detail =
       typeof payload === "object" && payload !== null
         ? JSON.stringify(payload)
         : String(payload);
-    const err = new Error(`Bedrock HTTP ${response.status}: ${detail}`);
-    (err as any).status = response.status;
+    const err = new Error(`Bedrock HTTP ${status}: ${detail}`);
+    (err as any).status = status;
     (err as any).detail = detail;
     throw err;
   }
@@ -195,11 +339,14 @@ function buildInferenceConfig(baseModel: string): Record<string, unknown> | unde
   return { maxTokens: 4096 };
 }
 
-export async function executeBedrockChat(options: BedrockChatOptions): Promise<{ text: string; modelUsed: string }> {
+export async function executeBedrockChat(options: BedrockChatOptions): Promise<BedrockChatResult> {
   const baseModel = migrateEolBedrockModelId(stripBedrockUiPrefix(options.modelName));
   const bedrockTools = options.tools || [];
   const messages = mapHistoryToBedrockMessages(options.history, options.userMessage);
   let resolvedModelId: string | null = null;
+  const routedVia = options.credentials.defenseGatewayUrl
+    ? "cisco-defense-gateway"
+    : "bedrock-direct";
 
   let loopLimit = 12;
   let replyText = "";
@@ -304,12 +451,24 @@ export async function executeBedrockChat(options: BedrockChatOptions): Promise<{
     if (!replyText && stopReason === "end_turn") {
       replyText = "No response text generated.";
     }
+
+    const gatewayBlock = parseDefenseGatewayPolicyBlock(replyText);
+    if (gatewayBlock) {
+      return {
+        text: replyText,
+        modelUsed: resolvedModelId || getBedrockModelIdCandidates(options.modelName, options.credentials.region)[0],
+        blocked: true,
+        blockReason: gatewayBlock,
+        routedVia,
+      };
+    }
     break;
   }
 
   return {
     text: replyText || "No reply from Bedrock.",
     modelUsed: resolvedModelId || getBedrockModelIdCandidates(options.modelName, options.credentials.region)[0],
+    routedVia,
   };
 }
 

@@ -19,6 +19,11 @@ import {
   persistBootstrapPasswordHash,
   validateDefaultPasswordPolicy,
 } from "./src/password-auth";
+import {
+  getDuoSsoSettingsForUi,
+  resolveDuoSsoCredentials,
+  saveDuoSsoConfig,
+} from "./duo-sso-config";
 import fs from "fs";
 import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
@@ -27,8 +32,11 @@ import { MCP_TOOLS_SPEC } from "./mcp-tool-definitions";
 import { createMcpExecutor } from "./mcp-runtime";
 import { mountMcpHttpServer } from "./mcp-http-server";
 import {
+  buildDefenseGatewayChatCompletionsUrl,
   buildInspectChatUrl,
   normalizeDefenseBaseUrl,
+  normalizeDefenseProxyUrl,
+  parseDefenseGatewayPolicyBlock,
   shouldProxyLlmThroughAiDefense,
 } from "./server-ai-defense";
 import { executeBedrockChat } from "./server-bedrock";
@@ -106,7 +114,18 @@ rotateConsoleLogFile();
 console.log("[VITALTRUST] Server process starting...");
 
 /** Unique per process start — clients use this to discard stale browser-side AI chat history after redeploy. */
-const BOOT_INSTANCE_ID = crypto.randomUUID();
+const bootInstancePath = path.join(process.cwd(), "boot_instance.id");
+let BOOT_INSTANCE_ID: string;
+if (fs.existsSync(bootInstancePath)) {
+  BOOT_INSTANCE_ID = fs.readFileSync(bootInstancePath, "utf-8").trim();
+  if (!BOOT_INSTANCE_ID) {
+    BOOT_INSTANCE_ID = crypto.randomUUID();
+    fs.writeFileSync(bootInstancePath, BOOT_INSTANCE_ID, "utf-8");
+  }
+} else {
+  BOOT_INSTANCE_ID = crypto.randomUUID();
+  fs.writeFileSync(bootInstancePath, BOOT_INSTANCE_ID, "utf-8");
+}
 console.log(`[VITALTRUST] Boot instance id: ${BOOT_INSTANCE_ID}`);
 
 process.on("uncaughtException", (err) => {
@@ -1036,27 +1055,19 @@ async function startServer() {
 
   // --- OIDC CONFIGURATION (Cisco Duo) ---
   let duoClient: any = null;
+  function resetDuoClientCache() {
+    duoClient = null;
+  }
   async function getDuoClient() {
     if (duoClient) return duoClient;
 
-    // Force reload from file if it exists (for hot-injected env vars)
-    const activeEnvPath = path.join(process.cwd(), ".env");
-    if (fs.existsSync(activeEnvPath)) {
-       dotenv.config({ path: activeEnvPath, override: true });
-    }
-    
-    const DUO_ISSUER_URL = process.env.DUO_ISSUER_URL;
-    const DUO_CLIENT_ID = process.env.DUO_CLIENT_ID;
-    const DUO_CLIENT_SECRET = process.env.DUO_CLIENT_SECRET;
-
-    if (!DUO_ISSUER_URL || !DUO_CLIENT_ID || !DUO_CLIENT_SECRET) {
-      console.log("[Duo] Configuration missing in environment. Keys check:", {
-        issuer: !!DUO_ISSUER_URL,
-        id: !!DUO_CLIENT_ID,
-        secret: !!DUO_CLIENT_SECRET
-      });
+    const duoConfig = resolveDuoSsoCredentials();
+    if (!duoConfig) {
+      console.log("[Duo] Configuration missing. Configure Duo SSO in Settings > Security Controls or set DUO_* environment variables.");
       return null;
     }
+
+    const { issuerUrl: DUO_ISSUER_URL, clientId: DUO_CLIENT_ID, clientSecret: DUO_CLIENT_SECRET } = duoConfig;
     
     try {
       console.log("[Duo] Attempting discovery with:", DUO_ISSUER_URL);
@@ -1095,16 +1106,85 @@ async function startServer() {
     }
 
     const client = await getDuoClient();
+    const duoSettings = getDuoSsoSettingsForUi();
     res.json({
-        envFound: envFileExists,
-        envScrubbed: envContent,
+        envFound: fs.existsSync(path.join(process.cwd(), ".env")),
         config: {
-            ISSUER: process.env.DUO_ISSUER_URL,
-            CLIENT_ID: process.env.DUO_CLIENT_ID ? "PRESENT" : "MISSING",
+            ISSUER: duoSettings.issuerUrl || undefined,
+            CLIENT_ID: duoSettings.clientId ? "PRESENT" : "MISSING",
+            SOURCE: duoSettings.source,
         },
         discoveryStatus: client ? "SUCCESS" : "FAILED",
         timestamp: new Date().toISOString()
     });
+  });
+
+  app.get("/api/auth/duo/config", (_req, res) => {
+    res.json(getDuoSsoSettingsForUi());
+  });
+
+  app.post("/api/auth/duo/config", (req, res) => {
+    const requesterRole = String(req.body?.requesterRole || "").toLowerCase();
+    if (requesterRole !== "admin") {
+      return res.status(403).json({ success: false, error: "Only administrators can update Duo SSO settings." });
+    }
+    try {
+      saveDuoSsoConfig({
+        issuerUrl: req.body?.issuerUrl,
+        clientId: req.body?.clientId,
+        clientSecret: req.body?.clientSecret,
+      });
+      resetDuoClientCache();
+      createLog(
+        "admin",
+        "Security Controls",
+        "admin",
+        "Duo SSO Settings Updated",
+        "Success",
+        "Cisco Duo OIDC issuer and application credentials saved from Settings UI.",
+        req
+      );
+      res.json({ success: true, settings: getDuoSsoSettingsForUi() });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err?.message || String(err) });
+    }
+  });
+
+  app.post("/api/auth/duo/test", async (req, res) => {
+    const requesterRole = String(req.body?.requesterRole || "").toLowerCase();
+    if (requesterRole !== "admin") {
+      return res.status(403).json({ success: false, message: "Only administrators can test Duo SSO settings." });
+    }
+    const issuerUrl = String(req.body?.issuerUrl || getDuoSsoSettingsForUi().issuerUrl || "").trim();
+    const clientId = String(req.body?.clientId || getDuoSsoSettingsForUi().clientId || "").trim();
+    const clientSecret = String(req.body?.clientSecret || "").trim();
+    const persisted = resolveDuoSsoCredentials();
+    const secret = clientSecret || persisted?.clientSecret || "";
+
+    if (!issuerUrl || !clientId || !secret) {
+      return res.status(400).json({
+        success: false,
+        message: "Issuer URL, Client ID, and Client Secret are required to test Duo SSO.",
+      });
+    }
+
+    try {
+      const issuer = await Issuer.discover(issuerUrl);
+      new issuer.Client({
+        client_id: clientId,
+        client_secret: secret,
+        response_types: ["code"],
+      });
+      res.json({
+        success: true,
+        message: `Duo OIDC discovery succeeded for ${issuer.issuer}. SSO login is ready to use.`,
+      });
+    } catch (err: any) {
+      res.status(200).json({
+        success: false,
+        message: err?.message || "Duo OIDC discovery failed. Verify issuer URL and application credentials.",
+      });
+    }
   });
 
   // Helper to get public redirect URI dynamically based on current request host
@@ -1623,7 +1703,11 @@ async function startServer() {
     app.get("/auth/callback", (req, res) => res.redirect("/api/auth/callback"));
 
     app.get("/api/auth/config", (req, res) => {
-      res.json({ defaultPasswordConfigured: isDefaultPasswordConfigured() });
+      const duoSettings = getDuoSsoSettingsForUi();
+      res.json({
+        defaultPasswordConfigured: isDefaultPasswordConfigured(),
+        duoSsoConfigured: duoSettings.configured,
+      });
     });
 
     app.post("/api/auth/bootstrap-default-password", (req, res) => {
@@ -2099,10 +2183,11 @@ async function startServer() {
       const { hr, temp, bp } = req.body;
       const patient = db_mock.patients.find((p: any) => p.id === req.params.id);
       if (patient) {
-        patient.vitals = { hr, temp, bp, lastUpdated: new Date().toISOString().split('T')[0] };
+        const vitals = { hr, temp, bp, lastUpdated: new Date().toISOString().split('T')[0] };
+        patient.vitals = vitals;
         savePersistedDb();
         createLog("clinical", "Clinical Service", "nurse", "Vitals Recorded", "Success", `Vitals for patient ${req.params.id}: HR=${hr}, BP=${bp}, T=${temp}`, req);
-        res.json({ success: true, patient });
+        res.json({ success: true, patientId: req.params.id, vitals });
       } else res.status(404).json({ error: "Patient not found" });
     });
     dbRouter.get("/lab-results", (req, res) => {
@@ -2641,6 +2726,69 @@ async function startServer() {
       return Array.from(new Set(elements));
     };
 
+    /**
+     * Build the assistant system prompt. Gateway mode uses a compact prompt so Cisco AI Defense
+     * inline proxy does not flag tool instructions, example phone numbers, or imperative patterns
+     * as prompt injection / PII leakage.
+     */
+    const buildAssistantSystemPrompt = (options: {
+      uName: string;
+      uId: string;
+      uRole: string;
+      targetModelName: string;
+      roleMcpGuidance: string;
+      compact: boolean;
+    }): string => {
+      const { uName, uId, uRole, targetModelName, roleMcpGuidance, compact } = options;
+
+      if (compact) {
+        return [
+          `You are the Vital Trust Virtual Health Assistant for ${uName}.`,
+          "",
+          "Answer general questions naturally, including casual conversation, humor, and creative requests.",
+          "",
+          "When the user asks about Vital Trust patients, schedules, medications, vitals, billing, audit logs, users, or configuration, use the available tools to retrieve accurate data. Do not invent clinical or operational records.",
+          "When the user asks which patients are assigned to them (my patients, my caseload, my ward assignments), call get_my_assigned_patients — not get_ward_roster.",
+          "When the user asks to change data, call the appropriate tool first and confirm success only after the tool response succeeds.",
+          "",
+          `Session role: ${uRole}. Session user id: ${uId}.`,
+          `Configured model label: ${targetModelName}.`,
+        ].join("\n");
+      }
+
+      return `You are the Vital Trust Virtual Health Assistant for ${uName}.
+
+General assistance:
+- Answer any user question naturally, including casual conversation, creative writing, and general knowledge. Vital Trust does not restrict prompts by login role.
+
+Private Vital Trust data (MCP tools):
+- When the user asks about Vital Trust patients, schedules, medications, vitals, billing, audit logs, users, or system configuration, call the appropriate MCP tools to read or update that data. Do not invent or guess private clinical information.
+- Each MCP tool uses the same authenticated REST APIs as the web portal. Tool authorization is enforced server-side per role.
+
+Data changes (create / update / delete):
+- Before confirming a write action (profile, messages, appointments, billing, etc.), call the matching MCP tool and wait for its success response.
+- Profile updates: call update_my_profile with the fields the user requested.
+- Message deletion: call get_my_messages if needed, then delete_messages with messageIds or sender filters.
+- Role broadcasts: call broadcast_message with receiverRole and content.
+- Appointment changes: use cancel_appointment, reschedule_appointment, cancel_appointments_by_date, or reschedule_appointments_by_date for writes; get_all_appointments and get_my_appointments are read-only.
+
+${roleMcpGuidance}
+
+Session context:
+- Logged-in User ID: ${uId}
+- Logged-in Real Name: ${uName}
+- Logged-in Role: ${uRole}
+
+MCP scoping for self-references (tools only, not for refusing other questions):
+- Nurse/Doctor: for my patients, my caseload, or patients assigned to me, call get_my_assigned_patients (server-filtered). Use get_ward_roster only when the user asks for the full clinic roster or another nurse's assignments.
+- Doctor: use get_all_appointments for schedule questions.
+- Patient: use patient-specific tools with user id ${uId}.
+- Administrator: system-wide visibility unless the user asks for a specific subset.
+
+If asked which model you use, say you correspond to configuration: ${targetModelName}.
+Be helpful, clear, and use markdown bullet lists when presenting structured data.`;
+    };
+
     // Main AI Chatbot with Cisco AI Defense Guardrails
     app.post("/api/ai/chat", async (req, res) => {
       const { 
@@ -2662,19 +2810,33 @@ async function startServer() {
       } = req.body;
 
       const isAiDefenseOn = aiDefenseEnabled === true || aiDefenseEnabled === "true" || enableAiDefense === true || enableAiDefense === "true";
-      const defenseBaseUrl = normalizeDefenseBaseUrl(
-        aiDefenseGateway || aiDefenseGatewayUrl || "https://us.api.inspect.aidefense.security.cisco.com"
-      );
-      const actualAiDefenseGatewayUrl = defenseBaseUrl;
+      const rawDefenseUrlSetting = (aiDefenseGatewayUrl || aiDefenseGateway || "").trim();
+      const defenseModeLabel = (aiDefenseMode || "Via API").trim();
       const proxyLlmViaDefenseGateway = shouldProxyLlmThroughAiDefense(
         isAiDefenseOn,
-        defenseBaseUrl,
-        aiDefenseMode
+        rawDefenseUrlSetting,
+        defenseModeLabel
       );
+      const defenseGatewayUrl = proxyLlmViaDefenseGateway
+        ? normalizeDefenseProxyUrl(rawDefenseUrlSetting)
+        : "";
+      const inspectBaseUrl = !proxyLlmViaDefenseGateway
+        ? normalizeDefenseBaseUrl(rawDefenseUrlSetting || "https://us.api.inspect.aidefense.security.cisco.com")
+        : "";
 
-      if (isAiDefenseOn && !proxyLlmViaDefenseGateway) {
+      if (isAiDefenseOn && proxyLlmViaDefenseGateway) {
+        if (!defenseGatewayUrl) {
+          return res.status(400).json({
+            error: "Cisco AI Defense Defense Gateway mode is enabled but no Gateway URL is configured. Add it in Settings → Security Controls.",
+            provider: "cisco-defense",
+          });
+        }
         console.log(
-          `[AI_DEFENSE] [API_MODE] Input inspect via ${buildInspectChatUrl(defenseBaseUrl)}; LLM calls go direct to provider (not proxied).`
+          `[AI_DEFENSE] [GATEWAY_MODE] LLM traffic will route through Defense Gateway: "${defenseGatewayUrl}" (no Inspect pre-scan).`
+        );
+      } else if (isAiDefenseOn) {
+        console.log(
+          `[AI_DEFENSE] [API_MODE] Input inspect via ${buildInspectChatUrl(inspectBaseUrl)}; LLM calls go direct to provider (not proxied).`
         );
       }
 
@@ -2693,10 +2855,10 @@ async function startServer() {
       let blockReason = "";
       let blockType = "Cisco AI Defense Content Guardrail";
 
-      // Resolve the API key from environment variable or client payload
+      // Resolve the API key from environment variable or client payload (API mode only)
       const activeDefenseApiKey = (aiDefenseApiKey || "").trim() || (process.env.CISCO_AI_DEFENSE_API_KEY || process.env.AI_DEFENSE_API_KEY || "").trim();
 
-      if (isAiDefenseOn && !activeDefenseApiKey) {
+      if (isAiDefenseOn && !proxyLlmViaDefenseGateway && !activeDefenseApiKey) {
         console.error("[AI_DEFENSE] AI Defense is enabled but no API key is configured.");
         return res.status(400).json({
           error: "Cisco AI Defense is enabled but no API key is configured. Add a key in Security Controls or set CISCO_AI_DEFENSE_API_KEY.",
@@ -2704,10 +2866,10 @@ async function startServer() {
         });
       }
 
-      // Query Cisco AI Defense cloud inspect service with the configured policy rules
-      if (isAiDefenseOn) {
+      // Query Cisco AI Defense cloud inspect service with the configured policy rules (API mode only)
+      if (isAiDefenseOn && !proxyLlmViaDefenseGateway) {
         try {
-          const inspectUrl = buildInspectChatUrl(defenseBaseUrl);
+          const inspectUrl = buildInspectChatUrl(inspectBaseUrl);
 
           console.log(`[AI_DEFENSE] [PRE_SCAN] Dispatching chat messages along with configured client policies to Cisco AI Defense Inspect API: "${inspectUrl}"`);
 
@@ -2795,55 +2957,20 @@ async function startServer() {
 
       const mcpCapabilitiesByRole: Record<string, string> = {
         admin: `Your MCP tools include full enterprise access: user directory, audit logs, system configuration, care-team assignment, billing queries (get_billing_records), messaging, and all clinical records (patients, appointments, medications, vitals). Prefer get_all_appointments for schedule reporting, get_ward_roster for patient-to-clinician mappings, and get_clinicians for staff lookups.`,
-        doctor: `Your MCP tools support clinical workflows: ward roster, assigned patient charts (get_assigned_patient_deep_dive), your appointment queue (get_all_appointments), vitals, prescribing, patient status updates, messaging, and billing queries for your clinician ID (get_billing_records). To cancel or move appointments you MUST call cancel_appointment, reschedule_appointment, cancel_appointments_by_date, or reschedule_appointments_by_date — never claim success after only reading the schedule.`,
-        nurse: `Your MCP tools support bedside workflows: ward roster, patient vitals, medication administration tasks (MAR), patient status updates, messaging (send_message for one recipient, broadcast_message for all users in a role), billing queries (get_billing_records), and full appointment management for visits where you are the assigned nurse.`,
+        doctor: `Your MCP tools support clinical workflows: get_my_assigned_patients for your caseload, full ward roster (get_ward_roster), assigned patient charts (get_assigned_patient_deep_dive), your appointment queue (get_all_appointments), vitals, prescribing, patient status updates, messaging, and billing queries for your clinician ID (get_billing_records). To cancel or move appointments you MUST call cancel_appointment, reschedule_appointment, cancel_appointments_by_date, or reschedule_appointments_by_date — never claim success after only reading the schedule.`,
+        nurse: `Your MCP tools support bedside workflows: get_my_assigned_patients for patients assigned to you, full ward roster (get_ward_roster) when asked about the whole clinic, patient vitals, medication administration tasks (MAR), patient status updates, messaging (send_message for one recipient, broadcast_message for all users in a role), billing queries (get_billing_records), and full appointment management for visits where you are the assigned nurse.`,
         patient: `Your MCP tools expose your own health record: profile, medications, appointments, lab results, billing, and messages. Use update_my_profile for profile changes, delete_messages to remove messages, send_message to compose, and create_appointment to schedule visits.`
       };
       const roleMcpGuidance = mcpCapabilitiesByRole[uRole] || mcpCapabilitiesByRole.patient;
 
-      const systemPrompt = `You are the Vital Trust Virtual Health Assistant for ${uName}.
-
-General assistance:
-- Answer any user question naturally, including casual conversation, creative writing, and general knowledge. Vital Trust does not restrict prompts by login role.
-
-Private Vital Trust data (MCP — required for EHR data):
-- When the user asks about Vital Trust patients, schedules, medications, vitals, billing, audit logs, users, or system configuration, you MUST call the appropriate MCP tools to read or mutate that data. Never invent, guess, or paste private clinical/PHI data from memory.
-- Each MCP tool calls the same authenticated REST APIs used by the web portal. Tool authorization is enforced server-side per role.
-
-Critical mutation rules (create / update / delete):
-- For ANY request to change data (profile fields, phone, email, messages, appointments, billing payment, etc.), you MUST call the matching MCP tool BEFORE telling the user the action succeeded.
-- NEVER claim an action succeeded unless the tool response confirms success or returns the updated record.
-- Profile updates: call update_my_profile with explicit fields (e.g. phone: "555-123-4567").
-- Message deletion: call get_my_messages first if needed, then delete_messages with messageIds or fromUserName/fromUserId.
-- Role broadcasts ("message all nurses/patients/doctors"): call broadcast_message with receiverRole and content — do not loop send_message manually.
-- Appointment changes: get_all_appointments / get_my_appointments are read-only discovery. To cancel or reschedule you MUST call a write tool and wait for its success response:
-  • "cancel all appointments on [date]" → cancel_appointments_by_date (date as YYYY-MM-DD; convert "August 8" → "2026-08-08")
-  • "move all appointments from [date A] to [date B]" → reschedule_appointments_by_date (preserves times)
-  • Single appointment → cancel_appointment or reschedule_appointment with appointmentId from the list
-  Never tell the user appointments were changed if you only called a read tool.
-- After a successful update_my_profile, you may summarize what changed based on the tool response only.
-
-${roleMcpGuidance}
-
-Session context:
-- Logged-in User ID: "${uId}"
-- Logged-in Real Name: "${uName}"
-- Logged-in Role: "${uRole}"
-
-MCP tool scoping for self-references (when using tools, not for refusing other questions):
-1. Nurse (role: "nurse"): when the user asks about "my patients" or "my ward", filter get_ward_roster results to patients where assignedNurseId equals "${uId}".
-2. Doctor (role: "doctor"): when the user asks about "my patients", filter get_ward_roster to assignedDoctorId equals "${uId}". Use get_all_appointments for their schedule queue.
-3. Patient (role: "patient"): use patient-specific tools with user ID "${uId}" for their own record.
-4. Administrator (role: "admin"): do not filter clinical data to a single user unless explicitly asked — system-wide visibility.
-
-Appointment MCP notes:
-- Doctors: get_all_appointments returns their queue by default (pass doctorId to query others). Use cancel_appointments_by_date / reschedule_appointments_by_date for bulk day-level changes.
-- Nurses: get_all_appointments returns the full schedule (pass nurseId "${uId}" for only their assigned visits). Create/update/cancel/reschedule only on appointments where nurseId equals "${uId}".
-- Administrators: get_all_appointments returns all appointments with care-team assignments.
-- Patients: view via get_my_appointments; create/update/cancel/reschedule only their own visits.
-
-If asked which model you use, say you correspond to configuration: ${targetModelName}.
-Be helpful, clear, and use markdown bullet lists when presenting structured data.`;
+      const systemPrompt = buildAssistantSystemPrompt({
+        uName,
+        uId,
+        uRole,
+        targetModelName,
+        roleMcpGuidance,
+        compact: proxyLlmViaDefenseGateway,
+      });
 
       const activeTools: string[] = ROLE_TOOLS[uRole] || [];
 
@@ -2885,14 +3012,9 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
 
         const useProxy = proxyLlmViaDefenseGateway;
         if (useProxy) {
-          clientOptions.baseUrl = actualAiDefenseGatewayUrl;
-          clientOptions.baseURL = actualAiDefenseGatewayUrl;
-          if (!clientOptions.httpOptions) clientOptions.httpOptions = {};
-          clientOptions.httpOptions.baseUrl = actualAiDefenseGatewayUrl;
-          clientOptions.httpOptions.baseURL = actualAiDefenseGatewayUrl;
-          if (!clientOptions.httpOptions.headers) clientOptions.httpOptions.headers = {};
-          clientOptions.httpOptions.headers["api-key"] = activeDefenseApiKey;
-          clientOptions.httpOptions.headers["Authorization"] = `Bearer ${activeDefenseApiKey}`;
+          throw new Error(
+            "Google Gemini is not supported through Cisco AI Defense Gateway. Use Via API inspect mode or switch to AWS Bedrock, OpenAI, or Groq with Defense Gateway."
+          );
         }
 
         const client = new GoogleGenAI(clientOptions);
@@ -3029,19 +3151,15 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             const useOpenAiProxy = proxyLlmViaDefenseGateway;
 
             if (useOpenAiProxy) {
-              let proxyUrl = actualAiDefenseGatewayUrl;
-              if (!proxyUrl.includes("/v1/chat/completions") && !proxyUrl.includes("/openai/v1/chat/completions")) {
-                proxyUrl = proxyUrl.endsWith("/") ? `${proxyUrl}v1/chat/completions` : `${proxyUrl}/v1/chat/completions`;
-              }
-              openaiTargetUrl = proxyUrl;
+              openaiTargetUrl = buildDefenseGatewayChatCompletionsUrl(defenseGatewayUrl);
             }
 
-            const openaiHeaders: any = { "Content-Type": "application/json" };
+            const openaiHeaders: Record<string, string> = {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${openaiKey}`,
+            };
             if (useOpenAiProxy) {
-              openaiHeaders["api-key"] = activeDefenseApiKey;
-              openaiHeaders["Authorization"] = `Bearer ${activeDefenseApiKey}`;
-            } else {
-              openaiHeaders["Authorization"] = `Bearer ${openaiKey}`;
+              openaiHeaders["Accept-Encoding"] = "";
             }
 
             console.log(`[AI_BROKER] [OPENAI_FETCH] Outgoing fetch to: [${openaiTargetUrl}]. Model: "${openaiModelId}". Proxy Mode: ${useOpenAiProxy}`);
@@ -3087,6 +3205,23 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
           }
 
           const reply = replyMessage?.content || "No reply from OpenAI.";
+          const gatewayBlock = proxyLlmViaDefenseGateway ? parseDefenseGatewayPolicyBlock(reply) : null;
+          if (gatewayBlock) {
+            createLog(
+              uId,
+              uName,
+              uRole,
+              "AI Assistant Conversation",
+              "Warning",
+              `[Cisco AI Defense Gateway Blocked] Patient ask: "${message.substring(0, 100)}" - Reason: POLICY VIOLATION: ${gatewayBlock}`,
+              req
+            );
+            return res.json({
+              response: `POLICY VIOLATION: ${gatewayBlock}`,
+              status: "Blocked",
+              provider: "cisco-defense",
+            });
+          }
 
           createLog(
             uId,
@@ -3150,24 +3285,15 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
 
              let groqTargetUrl = "https://api.groq.com/openai/v1/chat/completions";
             if (proxyLlmViaDefenseGateway) {
-              groqTargetUrl = actualAiDefenseGatewayUrl;
-              if (!groqTargetUrl.includes("/v1/chat/completions") && !groqTargetUrl.includes("/openai/v1/chat/completions")) {
-                if (groqTargetUrl.endsWith("/")) {
-                  groqTargetUrl += "v1/chat/completions";
-                } else {
-                  groqTargetUrl += "/v1/chat/completions";
-                }
-              }
+              groqTargetUrl = buildDefenseGatewayChatCompletionsUrl(defenseGatewayUrl);
             }
 
-            const groqHeaders: any = {
-              "Content-Type": "application/json"
+            const groqHeaders: Record<string, string> = {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${groqKey}`,
             };
             if (proxyLlmViaDefenseGateway) {
-              groqHeaders["api-key"] = activeDefenseApiKey;
-              groqHeaders["Authorization"] = `Bearer ${activeDefenseApiKey}`;
-            } else {
-              groqHeaders["Authorization"] = `Bearer ${groqKey}`;
+              groqHeaders["Accept-Encoding"] = "";
             }
 
             const groqRes = await fetch(groqTargetUrl, {
@@ -3211,6 +3337,23 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
           }
 
           const reply = replyMessage?.content || "No reply from Groq.";
+          const gatewayBlock = proxyLlmViaDefenseGateway ? parseDefenseGatewayPolicyBlock(reply) : null;
+          if (gatewayBlock) {
+            createLog(
+              uId,
+              uName,
+              uRole,
+              "AI Assistant Conversation",
+              "Warning",
+              `[Cisco AI Defense Gateway Blocked] Patient ask: "${message.substring(0, 100)}" - Reason: POLICY VIOLATION: ${gatewayBlock}`,
+              req
+            );
+            return res.json({
+              response: `POLICY VIOLATION: ${gatewayBlock}`,
+              status: "Blocked",
+              provider: "cisco-defense",
+            });
+          }
 
           createLog(
             uId,
@@ -3340,6 +3483,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
               secretAccessKey: awsSecretKey,
               region: awsRegion,
               customDns: awsCustomDns || undefined,
+              defenseGatewayUrl: proxyLlmViaDefenseGateway ? defenseGatewayUrl : undefined,
             },
             modelName: targetModelName,
             systemPrompt,
@@ -3349,13 +3493,31 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             executeTool: async (name, parsedArgs) => executeMCPTool(name, parsedArgs, uId, uRole),
           });
 
+          if (bedrockResult.blocked) {
+            const blockReason = bedrockResult.blockReason || bedrockResult.text;
+            createLog(
+              uId,
+              uName,
+              uRole,
+              "AI Assistant Conversation",
+              "Warning",
+              `[Cisco AI Defense Gateway Blocked] Patient ask: "${message.substring(0, 100)}" - Reason: POLICY VIOLATION: ${blockReason}`,
+              req
+            );
+            return res.json({
+              response: `POLICY VIOLATION: ${blockReason}`,
+              status: "Blocked",
+              provider: "cisco-defense",
+            });
+          }
+
           createLog(
             uId,
             uName,
             uRole,
             "AI Assistant Conversation",
             "Success",
-            `[AWS Bedrock - ${bedrockResult.modelUsed}] Patient asked: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`,
+            `[AWS Bedrock - ${bedrockResult.modelUsed}] Patient asked: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"${bedrockResult.routedVia === "cisco-defense-gateway" ? " (Cisco Defense Gateway)" : ""}`,
             req
           );
 

@@ -24,10 +24,53 @@ import {
   Shield,
   ShieldAlert,
   Loader2,
-  Bot
+  Bot,
+  Smartphone
 } from 'lucide-react';
 import { User } from '../../types';
 import { api } from '../../services/api';
+import { applyDefaultClientSettings } from '../../client-boot-sync';
+
+const AI_DEFENSE_INSPECT_SERVERS = [
+  'https://us.api.inspect.aidefense.security.cisco.com',
+  'https://ap.api.inspect.aidefense.security.cisco.com',
+  'https://eu.api.inspect.aidefense.security.cisco.com',
+  'https://uae.api.inspect.aidefense.security.cisco.com',
+] as const;
+
+const DEFAULT_AI_DEFENSE_INSPECT_SERVER = AI_DEFENSE_INSPECT_SERVERS[0];
+
+type AiDefenseIntegrationMode = 'Via API' | 'Defense Gateway';
+
+function isRegionalInspectServer(url: string): boolean {
+  const normalized = (url || '').trim().replace(/\/+$/, '');
+  return AI_DEFENSE_INSPECT_SERVERS.some(
+    (server) => normalized === server || normalized === `${server}/`
+  );
+}
+
+/** Tenant connection URL from AI Defense portal (Defense Gateway / proxy application). */
+function normalizeDefenseProxyUrl(raw: string): string {
+  let url = (raw || '').trim();
+  if (!url) return '';
+  if (!/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+  return url.replace(/\/+$/, '');
+}
+
+function isValidDefenseGatewayUrl(url: string): boolean {
+  const normalized = normalizeDefenseProxyUrl(url);
+  if (!normalized) return false;
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== 'https:') return false;
+  } catch {
+    return false;
+  }
+  // CogniSphere pattern: …/<tenant>/connections/<connection-id>
+  return /\/connections\/[a-f0-9-]+/i.test(normalized);
+}
 import { BEDROCK_UI_MODELS, migrateEolBedrockModelId, stripBedrockUiPrefix } from '../../bedrock-models';
 import { CLAUDE_UI_MODELS, migrateEolClaudeModelId, stripClaudeUiPrefix } from '../../claude-models';
 
@@ -141,6 +184,7 @@ const NodeCard = ({ name, roleKey, activeRole, ip, status, url, isMono }: any) =
 };
 
 export default function AISettings({ user }: { user: User }) {
+  const canConfigureSettings = user.role === 'admin';
   const [activeSubTab, setActiveSubTab] = useState<'model' | 'deployment' | 'security'>('deployment');
 
   // AI Model Tab States
@@ -185,10 +229,11 @@ export default function AISettings({ user }: { user: User }) {
   const [switchingMode, setSwitchingMode] = useState(false);
 
   // Security Controls Tab States
-  const [aiDefenseGateway, setAiDefenseGateway] = useState<string>('https://us.api.inspect.aidefense.security.cisco.com');
+  const [aiDefenseGateway, setAiDefenseGateway] = useState<string>(DEFAULT_AI_DEFENSE_INSPECT_SERVER);
   const [aiDefenseEnabled, setAiDefenseEnabled] = useState<boolean>(false);
-  const [aiDefenseMode, setAiDefenseMode] = useState<string>('Via API');
-  const [aiDefenseServer, setAiDefenseServer] = useState<string>('https://us.api.inspect.aidefense.security.cisco.com');
+  const [aiDefenseMode, setAiDefenseMode] = useState<AiDefenseIntegrationMode>('Via API');
+  const [aiDefenseServer, setAiDefenseServer] = useState<string>(DEFAULT_AI_DEFENSE_INSPECT_SERVER);
+  const [aiDefenseProxyUrl, setAiDefenseProxyUrl] = useState<string>('');
   const [aiDefenseApiKey, setAiDefenseApiKey] = useState<string>('');
   const [aiDefensePromptSource, setAiDefensePromptSource] = useState<string>('server');
   const [aiDefenseRules, setAiDefenseRules] = useState<Record<string, { enabled: boolean; action: 'Ignore' | 'Block' | 'Alert' }>>({
@@ -214,6 +259,17 @@ export default function AISettings({ user }: { user: User }) {
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [defenseTestStatus, setDefenseTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [defenseTestMessage, setDefenseTestMessage] = useState<string>('');
+
+  // Cisco Duo SSO (server-persisted)
+  const [duoIssuerUrl, setDuoIssuerUrl] = useState('');
+  const [duoClientId, setDuoClientId] = useState('');
+  const [duoClientSecret, setDuoClientSecret] = useState('');
+  const [duoHasStoredSecret, setDuoHasStoredSecret] = useState(false);
+  const [duoConfigSource, setDuoConfigSource] = useState<'settings' | 'environment' | 'none'>('none');
+  const [showDuoClientSecret, setShowDuoClientSecret] = useState(false);
+  const [duoSaveSuccess, setDuoSaveSuccess] = useState(false);
+  const [duoTestStatus, setDuoTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [duoTestMessage, setDuoTestMessage] = useState('');
 
   // Server credentials configuration availability
   const [serverKeysConfig, setServerKeysConfig] = useState<{
@@ -285,10 +341,19 @@ export default function AISettings({ user }: { user: User }) {
 
     // Security Gateways
     setAiDefenseEnabled(localStorage.getItem('vt_ai_defense_enabled') === 'true');
-    setAiDefenseMode(localStorage.getItem('vt_ai_defense_mode') || 'Via API');
-    const savedServer = localStorage.getItem('vt_ai_defense_server') || 'https://us.api.inspect.aidefense.security.cisco.com';
+    const savedMode = localStorage.getItem('vt_ai_defense_mode') || 'Via API';
+    setAiDefenseMode(savedMode === 'Defense Gateway' ? 'Defense Gateway' : 'Via API');
+    const savedServer = localStorage.getItem('vt_ai_defense_server') || DEFAULT_AI_DEFENSE_INSPECT_SERVER;
     setAiDefenseServer(savedServer);
-    setAiDefenseGateway(savedServer);
+    const savedProxyUrl =
+      localStorage.getItem('vt_ai_defense_proxy_url') ||
+      (savedMode === 'Defense Gateway' ? localStorage.getItem('vt_ai_defense_gateway') || '' : '');
+    setAiDefenseProxyUrl(savedProxyUrl);
+    setAiDefenseGateway(
+      savedMode === 'Defense Gateway' && savedProxyUrl
+        ? savedProxyUrl
+        : savedServer
+    );
     setAiDefenseApiKey(localStorage.getItem('vt_ai_defense_api_key') || '');
     setAiDefensePromptSource(localStorage.getItem('vt_ai_defense_prompt_source') || 'server');
 
@@ -332,6 +397,19 @@ export default function AISettings({ user }: { user: User }) {
         }
       })
       .catch(err => console.error('Error fetching agent config:', err));
+
+    api.getDuoSsoConfig()
+      .then(data => {
+        if (data && typeof data === 'object') {
+          setDuoIssuerUrl(String(data.issuerUrl || ''));
+          setDuoClientId(String(data.clientId || ''));
+          setDuoHasStoredSecret(!!data.hasClientSecret);
+          setDuoConfigSource(
+            data.source === 'settings' || data.source === 'environment' ? data.source : 'none'
+          );
+        }
+      })
+      .catch(err => console.error('Error fetching Duo SSO config:', err));
 
     // Fetch server keys fallback
     fetch('/api/ai/config')
@@ -391,17 +469,13 @@ export default function AISettings({ user }: { user: User }) {
   }, []);
 
   const handleFactoryReset = async () => {
+    if (!canConfigureSettings) return;
     setShowFactoryResetModal(false);
     setResetting(true);
     try {
       const res = await api.factoryReset();
       if (res.success) {
-        localStorage.setItem('vt_ai_defense_enabled', 'false');
-        localStorage.setItem('vt_ai_defense_server', 'https://us.api.inspect.aidefense.security.cisco.com');
-        localStorage.setItem('vt_ai_defense_gateway', 'https://us.api.inspect.aidefense.security.cisco.com');
-        localStorage.setItem('vt_ai_defense_api_key', '');
-        localStorage.setItem('vt_ai_defense_prompt_source', 'server');
-        localStorage.removeItem('vt_ai_defense_rules');
+        applyDefaultClientSettings();
         setStatusMessage({ type: 'success', text: "Database configuration restored to factory default successfully!" });
         setTimeout(() => {
           window.location.reload();
@@ -420,6 +494,7 @@ export default function AISettings({ user }: { user: User }) {
   // Saves AI Models Creds
   const handleSaveModelSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canConfigureSettings) return;
     localStorage.setItem('vt_ai_selected_model', selectedModel);
     localStorage.setItem('vt_ai_agent_selected_model', agentSelectedModel);
     localStorage.setItem('vt_ai_openai_key', openaiKey);
@@ -456,6 +531,7 @@ export default function AISettings({ user }: { user: User }) {
 
   const handleSaveAgentSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canConfigureSettings) return;
     const chartUpdaterIntervalMin = parseIntervalMinutes(agentChartUpdaterIntervalInput, 60);
     const overnightNurseIntervalMin = parseIntervalMinutes(agentOvernightNurseIntervalInput, 20);
     setAgentChartUpdaterIntervalInput(String(chartUpdaterIntervalMin));
@@ -493,8 +569,31 @@ export default function AISettings({ user }: { user: User }) {
   // Saves Cisco AI Defense Guardrails directly without mandatory connection check blocking
   const handleSaveSecuritySettings = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canConfigureSettings) return;
+
+    if (aiDefenseMode === 'Defense Gateway') {
+      const normalizedProxy = normalizeDefenseProxyUrl(aiDefenseProxyUrl);
+      if (!normalizedProxy) {
+        setDefenseTestStatus('error');
+        setDefenseTestMessage('Defense Gateway URL is required when using Defense Gateway mode.');
+        return;
+      }
+      if (!isValidDefenseGatewayUrl(normalizedProxy)) {
+        setDefenseTestStatus('error');
+        setDefenseTestMessage(
+          'Defense Gateway URL format looks invalid. Copy the full connection URL from your AI Defense application configuration (…/connections/<id>).'
+        );
+        return;
+      }
+      setAiDefenseProxyUrl(normalizedProxy);
+      localStorage.setItem('vt_ai_defense_proxy_url', normalizedProxy);
+      localStorage.setItem('vt_ai_defense_gateway', normalizedProxy);
+    } else {
+      localStorage.setItem('vt_ai_defense_gateway', aiDefenseServer);
+      localStorage.removeItem('vt_ai_defense_proxy_url');
+    }
+
     localStorage.setItem('vt_ai_defense_enabled', String(aiDefenseEnabled));
-    localStorage.setItem('vt_ai_defense_gateway', aiDefenseServer);
     localStorage.setItem('vt_ai_defense_mode', aiDefenseMode);
     localStorage.setItem('vt_ai_defense_server', aiDefenseServer);
     localStorage.setItem('vt_ai_defense_api_key', aiDefenseApiKey);
@@ -504,7 +603,11 @@ export default function AISettings({ user }: { user: User }) {
     window.dispatchEvent(new Event('vt_settings_updated'));
     
     setDefenseTestStatus('success');
-    setDefenseTestMessage('Success: Cisco AI Defense settings saved successfully!');
+    setDefenseTestMessage(
+      aiDefenseMode === 'Defense Gateway'
+        ? 'Success: Defense Gateway settings saved. LLM traffic will route through your tenant proxy URL on the next chat request (Bedrock-first).'
+        : 'Success: Cisco AI Defense settings saved successfully!'
+    );
     
     setSaveSuccess(true);
     setTimeout(() => {
@@ -516,6 +619,28 @@ export default function AISettings({ user }: { user: User }) {
 
   // Explicitly tests connectivity to Cisco Secure AI Defense via Inspect API
   const handleTestSecurityConnection = async () => {
+    if (!canConfigureSettings) return;
+    if (aiDefenseMode === 'Defense Gateway') {
+      const normalizedProxy = normalizeDefenseProxyUrl(aiDefenseProxyUrl);
+      if (!normalizedProxy) {
+        setDefenseTestStatus('error');
+        setDefenseTestMessage('Enter your Defense Gateway URL before testing.');
+        return;
+      }
+      if (!isValidDefenseGatewayUrl(normalizedProxy)) {
+        setDefenseTestStatus('error');
+        setDefenseTestMessage(
+          'URL format check failed. Use the connection URL from AI Defense (includes /connections/<id>).'
+        );
+        return;
+      }
+      setDefenseTestStatus('success');
+      setDefenseTestMessage(
+        `URL format validated: ${normalizedProxy}. Full gateway connectivity is verified when you send a Bedrock chat through the proxy.`
+      );
+      return;
+    }
+
     setDefenseTestStatus('testing');
     setDefenseTestMessage('Testing connectivity to Cisco AI Defense Inspect API...');
     
@@ -527,7 +652,8 @@ export default function AISettings({ user }: { user: User }) {
         },
         body: JSON.stringify({
           gatewayUrl: aiDefenseServer,
-          apiKey: aiDefenseApiKey
+          apiKey: aiDefenseApiKey,
+          aiDefenseMode
         })
       });
       const data = await res.json();
@@ -545,9 +671,106 @@ export default function AISettings({ user }: { user: User }) {
     }
   };
 
+  const handleSaveDuoSsoSettings = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!canConfigureSettings) return;
+
+    setDuoTestStatus('idle');
+    setDuoTestMessage('');
+
+    const issuerUrl = duoIssuerUrl.trim();
+    const clientId = duoClientId.trim();
+    const clientSecret = duoClientSecret.trim();
+
+    if (!issuerUrl) {
+      setDuoTestStatus('error');
+      setDuoTestMessage('Duo OIDC Issuer URL is required.');
+      return;
+    }
+    if (!clientId) {
+      setDuoTestStatus('error');
+      setDuoTestMessage('Duo Application Client ID is required.');
+      return;
+    }
+    if (!clientSecret && !duoHasStoredSecret) {
+      setDuoTestStatus('error');
+      setDuoTestMessage('Duo Application Client Secret is required.');
+      return;
+    }
+
+    try {
+      const result = await api.saveDuoSsoConfig({
+        issuerUrl,
+        clientId,
+        ...(clientSecret ? { clientSecret } : {}),
+        requesterRole: user.role,
+      });
+
+      if (!result.success) {
+        setDuoTestStatus('error');
+        setDuoTestMessage(result.error || 'Failed to save Duo SSO settings.');
+        return;
+      }
+
+      const settings = result.settings;
+      if (settings && typeof settings === 'object') {
+        setDuoIssuerUrl(String(settings.issuerUrl || issuerUrl));
+        setDuoClientId(String(settings.clientId || clientId));
+        setDuoHasStoredSecret(!!settings.hasClientSecret);
+        setDuoConfigSource(
+          settings.source === 'settings' || settings.source === 'environment' ? settings.source : 'settings'
+        );
+      } else {
+        setDuoHasStoredSecret(true);
+        setDuoConfigSource('settings');
+      }
+
+      setDuoClientSecret('');
+      setDuoSaveSuccess(true);
+      setDuoTestStatus('success');
+      setDuoTestMessage('Duo SSO settings saved. Users can sign in with Cisco Duo from the login page.');
+      setTimeout(() => {
+        setDuoSaveSuccess(false);
+        setDuoTestStatus('idle');
+        setDuoTestMessage('');
+      }, 4000);
+    } catch (err: any) {
+      setDuoTestStatus('error');
+      setDuoTestMessage(err?.message || 'Failed to save Duo SSO settings.');
+    }
+  };
+
+  const handleTestDuoSsoSettings = async () => {
+    if (!canConfigureSettings) return;
+
+    setDuoTestStatus('testing');
+    setDuoTestMessage('Testing Duo OIDC discovery and application credentials...');
+
+    try {
+      const result = await api.testDuoSsoConfig({
+        issuerUrl: duoIssuerUrl.trim(),
+        clientId: duoClientId.trim(),
+        ...(duoClientSecret.trim() ? { clientSecret: duoClientSecret.trim() } : {}),
+        requesterRole: user.role,
+      });
+
+      if (result.success) {
+        setDuoTestStatus('success');
+        setDuoTestMessage(result.message || 'Duo SSO connection test succeeded.');
+      } else {
+        setDuoTestStatus('error');
+        setDuoTestMessage(result.message || result.error || 'Duo SSO connection test failed.');
+      }
+    } catch (err: any) {
+      setDuoTestStatus('error');
+      setDuoTestMessage(err?.message || 'Duo SSO connection test failed.');
+    }
+  };
+
   // Saves Node URL Connectivity Settings without mode switches
   const handleSaveDeploymentConfig = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canConfigureSettings) return;
     setSavingDeployment(true);
 
     const buildUrl = (ipOrFqdn: string) => {
@@ -640,6 +863,7 @@ export default function AISettings({ user }: { user: User }) {
 
   // Dynamic Mode toggling (STANDALONE <-> DISTRIBUTED)
   const handleToggleModeSelection = async (targetMode: 'standalone' | 'distributed') => {
+    if (!canConfigureSettings) return;
     setSwitchingMode(true);
     try {
       if (targetMode === 'standalone') {
@@ -763,6 +987,18 @@ export default function AISettings({ user }: { user: User }) {
         </div>
       </div>
 
+      {!canConfigureSettings && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
+          <Lock size={18} className="text-amber-700 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-bold text-amber-900 uppercase tracking-wide">View-only settings access</p>
+            <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+              Your role can review deployment, AI, and security configuration. Only administrators may change settings or save credentials.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Modern High-Contrast Tab Switcher */}
       <div className="flex flex-wrap gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200/60 font-medium">
         <button
@@ -803,7 +1039,7 @@ export default function AISettings({ user }: { user: User }) {
       </div>
 
       {/* Tabs Subviews */}
-      <div className="space-y-6">
+      <div className={`space-y-6 ${!canConfigureSettings ? '[&_input]:pointer-events-none [&_select]:pointer-events-none [&_textarea]:pointer-events-none [&_button[type=submit]]:pointer-events-none [&_button[type=submit]]:opacity-50 [&_input]:cursor-default [&_select]:cursor-default [&_input]:bg-slate-50/80 [&_select]:bg-slate-50/80' : ''}`}>
         {/* Tab 1: AI Model Settings */}
         {activeSubTab === 'model' && (
           <>
@@ -1171,8 +1407,12 @@ export default function AISettings({ user }: { user: User }) {
                         <label className="text-xs font-bold text-slate-800">Chart Updater Agent</label>
                         <button
                           type="button"
-                          onClick={() => setAgentChartUpdaterEnabled(!agentChartUpdaterEnabled)}
-                          className={`relative w-11 h-6 rounded-full transition-colors ${agentChartUpdaterEnabled ? 'bg-[#7c1a1a]' : 'bg-slate-300'}`}
+                          disabled={!canConfigureSettings}
+                          onClick={() => {
+                            if (!canConfigureSettings) return;
+                            setAgentChartUpdaterEnabled(!agentChartUpdaterEnabled);
+                          }}
+                          className={`relative w-11 h-6 rounded-full transition-colors ${agentChartUpdaterEnabled ? 'bg-[#7c1a1a]' : 'bg-slate-300'} ${!canConfigureSettings ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
                           <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${agentChartUpdaterEnabled ? 'translate-x-5' : ''}`} />
                         </button>
@@ -1202,8 +1442,12 @@ export default function AISettings({ user }: { user: User }) {
                         <label className="text-xs font-bold text-slate-800">Overnight Nurse Agent</label>
                         <button
                           type="button"
-                          onClick={() => setAgentOvernightNurseEnabled(!agentOvernightNurseEnabled)}
-                          className={`relative w-11 h-6 rounded-full transition-colors ${agentOvernightNurseEnabled ? 'bg-[#7c1a1a]' : 'bg-slate-300'}`}
+                          disabled={!canConfigureSettings}
+                          onClick={() => {
+                            if (!canConfigureSettings) return;
+                            setAgentOvernightNurseEnabled(!agentOvernightNurseEnabled);
+                          }}
+                          className={`relative w-11 h-6 rounded-full transition-colors ${agentOvernightNurseEnabled ? 'bg-[#7c1a1a]' : 'bg-slate-300'} ${!canConfigureSettings ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
                           <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${agentOvernightNurseEnabled ? 'translate-x-5' : ''}`} />
                         </button>
@@ -1715,7 +1959,9 @@ export default function AISettings({ user }: { user: User }) {
                     </span>
                     <button
                       type="button"
+                      disabled={!canConfigureSettings}
                       onClick={() => {
+                        if (!canConfigureSettings) return;
                         const nextVal = !aiDefenseEnabled;
                         setAiDefenseEnabled(nextVal);
                         localStorage.setItem('vt_ai_defense_enabled', String(nextVal));
@@ -1723,7 +1969,7 @@ export default function AISettings({ user }: { user: User }) {
                       }}
                       className={`w-11 h-6 flex items-center rounded-full p-1 transition-all duration-300 focus:outline-none ${
                         aiDefenseEnabled ? 'bg-emerald-500 justify-end' : 'bg-slate-300 justify-start'
-                      }`}
+                      } ${!canConfigureSettings ? 'opacity-60 cursor-not-allowed' : ''}`}
                     >
                       <motion.div layout className="w-4 h-4 rounded-full bg-white shadow-md cursor-pointer" />
                     </button>
@@ -1744,29 +1990,81 @@ export default function AISettings({ user }: { user: User }) {
                       </h5>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6 border-b border-slate-100">
-                        <div className="space-y-1.5">
+                        <div className="space-y-1.5 md:col-span-2">
                           <label className="text-xs font-black uppercase text-slate-500 tracking-wider">
                             Defense Mode
                           </label>
                           <select
                             value={aiDefenseMode}
-                            onChange={(e) => setAiDefenseMode(e.target.value)}
+                            onChange={(e) => {
+                              const nextMode = e.target.value as AiDefenseIntegrationMode;
+                              setAiDefenseMode(nextMode);
+                              if (nextMode === 'Defense Gateway') {
+                                setDefenseTestStatus('idle');
+                                setDefenseTestMessage('');
+                              }
+                            }}
                             className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs text-slate-800 font-semibold focus:outline-none transition-all cursor-pointer"
                           >
-                            <option value="Via API">Via API</option>
+                            <option value="Via API">Via API (Inspect pre-scan)</option>
+                            <option value="Defense Gateway">Defense Gateway (inline LLM proxy)</option>
                           </select>
+                          <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                            {aiDefenseMode === 'Via API'
+                              ? 'VitalTrust calls the Inspect API for pass/fail, then sends LLM requests directly to OpenAI, Gemini, Groq, etc.'
+                              : 'VitalTrust sends LLM requests to your tenant Defense Gateway URL. Policy enforcement is inline at Cisco (separate AI Defense application + policy).'}
+                          </p>
                         </div>
 
+                        {aiDefenseMode === 'Defense Gateway' ? (
+                          <>
+                            <div className="space-y-1.5 md:col-span-2">
+                              <label className="text-[10px] font-black uppercase text-[#7c1a1a] tracking-wider flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 bg-[#7c1a1a] rounded-full animate-pulse" />
+                                Defense Gateway URL
+                              </label>
+                              <input
+                                type="text"
+                                value={aiDefenseProxyUrl}
+                                onChange={(e) => setAiDefenseProxyUrl(e.target.value)}
+                                placeholder="https://<region>.gateway.aidefense.security.cisco.com/.../connections/<connection-id>"
+                                className="w-full bg-[#fafafa] border border-rose-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs text-slate-800 font-mono focus:outline-none transition-all"
+                                required
+                              />
+                              <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                                Copy this from your Cisco AI Defense tenant under the <strong>Defense Gateway</strong> application configuration (Connection Guide). This is not the regional Inspect API hostname used in API mode.
+                              </p>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-black uppercase text-slate-500 tracking-wider">
+                                Prompt Sender Posture
+                              </label>
+                              <select
+                                value={aiDefensePromptSource}
+                                onChange={(e) => setAiDefensePromptSource(e.target.value)}
+                                className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs text-slate-800 font-semibold focus:outline-none transition-all cursor-pointer"
+                              >
+                                <option value="server">Send Prompt from Server itself</option>
+                                <option value="browser">Send Prompt from Browser</option>
+                              </select>
+                            </div>
+
+                            <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
+                              <p className="text-[11px] text-amber-900 font-semibold leading-relaxed">
+                                Defense Gateway mode routes LLM traffic through Cisco&apos;s inline proxy. <strong>AWS Bedrock</strong> is the primary path (SigV4-signed Converse). <strong>OpenAI</strong> and <strong>Groq</strong> also route via <code className="text-[10px] bg-amber-100 px-1 rounded">/v1/chat/completions</code> on the gateway URL. Use Via API inspect mode for Gemini.
+                              </p>
+                            </div>
+                          </>
+                        ) : (
+                          <>
                         <div className="space-y-1.5">
                           <label className="text-xs font-black uppercase text-slate-500 tracking-wider">
                             Select API Server
                           </label>
                           <select
                             value={
-                              aiDefenseServer !== "https://us.api.inspect.aidefense.security.cisco.com" &&
-                              aiDefenseServer !== "https://ap.api.inspect.aidefense.security.cisco.com" &&
-                              aiDefenseServer !== "https://eu.api.inspect.aidefense.security.cisco.com" &&
-                              aiDefenseServer !== "https://uae.api.inspect.aidefense.security.cisco.com"
+                              !isRegionalInspectServer(aiDefenseServer)
                                 ? "custom"
                                 : aiDefenseServer
                             }
@@ -1782,22 +2080,19 @@ export default function AISettings({ user }: { user: User }) {
                             }}
                             className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs text-slate-800 font-semibold focus:outline-none transition-all cursor-pointer font-mono"
                           >
-                            <option value="https://us.api.inspect.aidefense.security.cisco.com">US Server</option>
-                            <option value="https://ap.api.inspect.aidefense.security.cisco.com">AP Server</option>
-                            <option value="https://eu.api.inspect.aidefense.security.cisco.com">EU Server</option>
-                            <option value="https://uae.api.inspect.aidefense.security.cisco.com">UAE Server</option>
-                            <option value="custom">✍️ Custom Tenant Gateway URL...</option>
+                            <option value={AI_DEFENSE_INSPECT_SERVERS[0]}>US Server</option>
+                            <option value={AI_DEFENSE_INSPECT_SERVERS[1]}>AP Server</option>
+                            <option value={AI_DEFENSE_INSPECT_SERVERS[2]}>EU Server</option>
+                            <option value={AI_DEFENSE_INSPECT_SERVERS[3]}>UAE Server</option>
+                            <option value="custom">✍️ Custom Tenant Inspect URL...</option>
                           </select>
                         </div>
 
-                        {aiDefenseServer !== "https://us.api.inspect.aidefense.security.cisco.com" &&
-                          aiDefenseServer !== "https://ap.api.inspect.aidefense.security.cisco.com" &&
-                          aiDefenseServer !== "https://eu.api.inspect.aidefense.security.cisco.com" &&
-                          aiDefenseServer !== "https://uae.api.inspect.aidefense.security.cisco.com" && (
+                        {!isRegionalInspectServer(aiDefenseServer) && (
                             <div className="space-y-1.5 md:col-span-2">
                               <label className="text-[10px] font-black uppercase text-[#7c1a1a] tracking-wider flex items-center gap-1.5">
                                 <span className="w-1.5 h-1.5 bg-[#7c1a1a] rounded-full animate-pulse" />
-                                Custom Cisco AI Defense Gateway URL (Specific Tenant Integration URL)
+                                Custom Cisco AI Defense Inspect URL
                               </label>
                               <input
                                 type="text"
@@ -1811,7 +2106,7 @@ export default function AISettings({ user }: { user: User }) {
                                 required
                               />
                               <p className="text-[11px] text-slate-500 font-medium">
-                                Check your Cisco AI Defense Administration portal settings to copy your exact endpoint integration URL (which usually includes your tenant subdomain).
+                                Regional Inspect API endpoint for out-of-band pre-scan (API mode only).
                               </p>
                             </div>
                           )}
@@ -1842,10 +2137,13 @@ export default function AISettings({ user }: { user: User }) {
                             <option value="browser">Send Prompt from Browser</option>
                           </select>
                         </div>
+                          </>
+                        )}
                       </div>
                     </div>
 
-                    {/* Rule policy definition matrix */}
+                    {/* Rule policy definition matrix — API mode only (gateway policy lives in AI Defense portal) */}
+                    {aiDefenseMode === 'Via API' ? (
                     <div className="space-y-4">
                       <div>
                         <h6 className="text-xs font-black uppercase text-slate-500 tracking-wider">
@@ -1924,6 +2222,13 @@ export default function AISettings({ user }: { user: User }) {
                         })}
                       </div>
                     </div>
+                    ) : (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <p className="text-[11px] text-slate-600 font-semibold leading-relaxed">
+                          Policy rules for Defense Gateway mode are configured in the Cisco AI Defense tenant (separate application configuration and policy). VitalTrust does not send the Enabled Rules matrix to the gateway proxy.
+                        </p>
+                      </div>
+                    )}
 
                     <div className="flex flex-col gap-3 pt-4 border-t border-slate-100">
                       {defenseTestMessage && (
@@ -1949,7 +2254,7 @@ export default function AISettings({ user }: { user: User }) {
                           }`}
                         >
                           <Shield size={14} className={defenseTestStatus === 'testing' ? 'animate-pulse text-amber-500' : 'text-slate-500'} />
-                          {defenseTestStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+                          {defenseTestStatus === 'testing' ? 'Testing...' : aiDefenseMode === 'Defense Gateway' ? 'Validate Gateway URL' : 'Test Connection'}
                         </button>
 
                         <button
@@ -1967,6 +2272,158 @@ export default function AISettings({ user }: { user: User }) {
                     </div>
                   </form>
                 )}
+              </div>
+            </div>
+
+            {/* Duo SSO Settings */}
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden">
+              <div className="p-6 bg-gradient-to-r from-slate-950 to-slate-900 text-white flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <Smartphone size={22} className="text-emerald-400" />
+                  <div>
+                    <h4 className="text-sm font-bold tracking-wide uppercase font-sans">Duo SSO Settings</h4>
+                    <p className="text-[11px] text-gray-300 mt-0.5">Cisco Duo OpenID Connect single sign-on</p>
+                  </div>
+                </div>
+                <span className={`text-[9px] px-2.5 py-0.5 border rounded font-black uppercase tracking-wider ${
+                  duoHasStoredSecret || duoConfigSource !== 'none'
+                    ? 'text-emerald-300 bg-emerald-950/25 border-emerald-700/40'
+                    : 'text-amber-300 bg-amber-950/25 border-amber-700/40'
+                }`}>
+                  {duoHasStoredSecret ? 'Configured' : 'Not Configured'}
+                </span>
+              </div>
+
+              <div className="p-8 space-y-6">
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                  <p className="text-xs text-slate-600 leading-relaxed font-semibold">
+                    Configure your Cisco Duo OIDC application credentials here. These values replace the former{' '}
+                    <code className="text-[10px] bg-white px-1 py-0.5 rounded border border-slate-200">DUO_*</code>{' '}
+                    environment variables and are stored on the server. Settings saved here take precedence over any remaining{' '}
+                    <code className="text-[10px] bg-white px-1 py-0.5 rounded border border-slate-200">.env</code>{' '}
+                    values.
+                    {duoConfigSource === 'environment' && (
+                      <span className="block mt-2 text-amber-700 font-bold">
+                        Currently using credentials from the server environment. Save here to persist them in Settings instead.
+                      </span>
+                    )}
+                  </p>
+                </div>
+
+                <form onSubmit={handleSaveDuoSsoSettings} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-1.5 md:col-span-2">
+                      <label className="text-xs font-black uppercase text-slate-500 tracking-wider">
+                        Duo OIDC Issuer URL
+                      </label>
+                      <input
+                        type="url"
+                        value={duoIssuerUrl}
+                        onChange={(e) => setDuoIssuerUrl(e.target.value)}
+                        disabled={!canConfigureSettings}
+                        placeholder="https://api-xxxxxxxx.duosecurity.com/oauth/v1/authorize"
+                        className="w-full bg-[#fafafa] border border-slate-200 focus:border-emerald-600 rounded-xl px-4 py-2.5 text-xs text-slate-800 font-mono focus:outline-none transition-all disabled:opacity-70"
+                        required
+                      />
+                      <p className="text-[11px] text-slate-500 font-medium">
+                        The OIDC issuer URL from your Duo Admin Panel application configuration.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-black uppercase text-slate-500 tracking-wider">
+                        Duo Application Client ID
+                      </label>
+                      <input
+                        type="text"
+                        value={duoClientId}
+                        onChange={(e) => setDuoClientId(e.target.value)}
+                        disabled={!canConfigureSettings}
+                        placeholder="DIXXXXXXXXXXXXXXXXXX"
+                        className="w-full bg-[#fafafa] border border-slate-200 focus:border-emerald-600 rounded-xl px-4 py-2.5 text-xs text-slate-800 font-mono focus:outline-none transition-all disabled:opacity-70"
+                        required
+                      />
+                      <p className="text-[11px] text-slate-500 font-medium">
+                        Client ID from your Duo OIDC application.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-black uppercase text-slate-500 tracking-wider">
+                        Duo Application Client Secret
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showDuoClientSecret ? 'text' : 'password'}
+                          value={duoClientSecret}
+                          onChange={(e) => setDuoClientSecret(e.target.value)}
+                          disabled={!canConfigureSettings}
+                          placeholder={duoHasStoredSecret ? '••••••••••••••••••••••••••••••••' : 'Enter client secret'}
+                          className="w-full bg-[#fafafa] border border-slate-200 focus:border-emerald-600 rounded-xl px-4 py-2.5 pr-10 text-xs text-slate-800 font-mono focus:outline-none transition-all disabled:opacity-70"
+                        />
+                        <button
+                          type="button"
+                          disabled={!canConfigureSettings}
+                          onClick={() => setShowDuoClientSecret((prev) => !prev)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 disabled:opacity-50"
+                          aria-label={showDuoClientSecret ? 'Hide client secret' : 'Show client secret'}
+                        >
+                          {showDuoClientSecret ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-medium">
+                        {duoHasStoredSecret
+                          ? 'Leave blank to keep the existing secret. Enter a new value only when rotating credentials.'
+                          : 'Client secret from your Duo OIDC application.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 pt-4 border-t border-slate-100">
+                    {duoTestMessage && (
+                      <div className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center gap-2.5 transition-all ${
+                        duoTestStatus === 'testing' ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse' :
+                        duoTestStatus === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                        'bg-rose-50 text-rose-700 border-rose-100'
+                      }`}>
+                        {duoTestStatus === 'testing' && <Loader2 className="animate-spin w-4 h-4 shrink-0" />}
+                        {duoTestStatus === 'success' && <Smartphone className="w-4 h-4 shrink-0 text-emerald-600" />}
+                        {duoTestStatus === 'error' && <Smartphone className="w-4 h-4 shrink-0 text-rose-600" />}
+                        <span>{duoTestMessage}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-end gap-3.5">
+                      <button
+                        type="button"
+                        disabled={!canConfigureSettings || duoTestStatus === 'testing'}
+                        onClick={handleTestDuoSsoSettings}
+                        className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 border transition-all shadow-md active:translate-y-px ${
+                          !canConfigureSettings || duoTestStatus === 'testing'
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed shadow-none'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300 cursor-pointer'
+                        }`}
+                      >
+                        <Smartphone size={14} className={duoTestStatus === 'testing' ? 'animate-pulse text-amber-500' : 'text-slate-500'} />
+                        {duoTestStatus === 'testing' ? 'Testing...' : 'Test Duo SSO'}
+                      </button>
+
+                      <button
+                        type="submit"
+                        disabled={!canConfigureSettings || duoTestStatus === 'testing'}
+                        className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-md active:translate-y-px ${
+                          !canConfigureSettings || duoTestStatus === 'testing'
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed shadow-none'
+                            : duoSaveSuccess
+                              ? 'bg-emerald-600 text-white border border-emerald-600 shadow-emerald-950/20'
+                              : 'bg-emerald-700 text-white hover:bg-emerald-800 border border-emerald-700 shadow-emerald-950/20 cursor-pointer'
+                        }`}
+                      >
+                        {duoSaveSuccess ? <Check size={14} /> : <Save size={14} />}
+                        {duoSaveSuccess ? 'Saved' : 'Save Duo SSO Settings'}
+                      </button>
+                    </div>
+                  </div>
+                </form>
               </div>
             </div>
 

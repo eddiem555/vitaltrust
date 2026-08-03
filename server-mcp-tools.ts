@@ -26,7 +26,7 @@ export const ROLE_TOOLS: Record<string, string[]> = {
     "update_my_profile", "change_my_password"
   ],
   nurse: [
-    "get_ward_roster", "get_patient_vitals", "record_vitals", "get_medication_tasks",
+    "get_my_assigned_patients", "get_ward_roster", "get_patient_vitals", "record_vitals", "get_medication_tasks",
     "update_medication_status", "update_patient_status",
     "get_all_appointments", "create_appointment", "update_appointment",
     "cancel_appointment", "reschedule_appointment",
@@ -36,7 +36,7 @@ export const ROLE_TOOLS: Record<string, string[]> = {
     "update_my_profile", "change_my_password"
   ],
   doctor: [
-    "get_ward_roster", "get_assigned_patient_deep_dive", "get_all_appointments",
+    "get_my_assigned_patients", "get_ward_roster", "get_assigned_patient_deep_dive", "get_all_appointments",
     "get_patient_vitals", "record_vitals", "prescribe_medication", "discontinue_medication",
     "update_patient_status",
     "create_appointment", "update_appointment", "cancel_appointment", "reschedule_appointment",
@@ -49,7 +49,7 @@ export const ROLE_TOOLS: Record<string, string[]> = {
     "query_audit_logs", "get_user_directory", "manage_user_persona", "get_infrastructure_topology",
     "emergency_system_reset", "create_user", "delete_user", "assign_patient_care_team",
     "get_system_config", "update_system_config",
-    "get_clinicians", "get_ward_roster", "get_assigned_patient_deep_dive", "get_all_appointments",
+    "get_clinicians", "get_my_assigned_patients", "get_ward_roster", "get_assigned_patient_deep_dive", "get_all_appointments",
     "get_patient_vitals", "record_vitals", "get_medication_tasks", "update_medication_status",
     "prescribe_medication", "discontinue_medication", "update_patient_status",
     "create_appointment", "update_appointment", "cancel_appointment", "reschedule_appointment",
@@ -149,17 +149,46 @@ async function resolveDirectoryUser(
 
 function enrichRoster(patientsList: any) {
   if (!Array.isArray(patientsList)) return patientsList;
-  return patientsList.map((p: any) => {
-    const statusNormalized = (p.status || "active").toLowerCase().trim();
-    return {
-      ...p,
-      isTriage: statusNormalized === "pending-triage" || statusNormalized === "triage",
-      isDischarged: statusNormalized === "discharged",
-      isActive: statusNormalized === "active",
-      isInactive: statusNormalized === "discharged" || statusNormalized === "inactive",
-      statusLabel: p.status === "pending-triage" ? "Triage (pending-triage)" : p.status
-    };
-  });
+  return patientsList.map((p: any) => enrichPatientRosterRow(p));
+}
+
+function enrichPatientRosterRow(p: any) {
+  const statusNormalized = (p.status || "active").toLowerCase().trim();
+  return {
+    ...p,
+    isTriage: statusNormalized === "pending-triage" || statusNormalized === "triage",
+    isDischarged: statusNormalized === "discharged",
+    isActive: statusNormalized === "active",
+    isInactive: statusNormalized === "discharged" || statusNormalized === "inactive",
+    statusLabel: p.status === "pending-triage" ? "Triage (pending-triage)" : p.status
+  };
+}
+
+/** Summary fields for assigned-patient lists (no SSN/insurance/clinical_notes). */
+function toAssignedPatientSummary(p: any) {
+  const enriched = enrichPatientRosterRow(p);
+  return {
+    id: enriched.id,
+    name: enriched.name,
+    status: enriched.status,
+    statusLabel: enriched.statusLabel,
+    condition: enriched.condition,
+    assignedDoctorId: enriched.assignedDoctorId,
+    assignedNurseId: enriched.assignedNurseId,
+    isTriage: enriched.isTriage,
+    isActive: enriched.isActive,
+    isDischarged: enriched.isDischarged,
+  };
+}
+
+function filterPatientsAssignedToClinician(patientsList: any[], uId: string, uRole: string) {
+  if (uRole === "nurse") {
+    return patientsList.filter((p) => p.assignedNurseId === uId);
+  }
+  if (uRole === "doctor") {
+    return patientsList.filter((p) => p.assignedDoctorId === uId);
+  }
+  return [];
 }
 
 export async function runMcpTool(
@@ -477,6 +506,30 @@ export async function runMcpTool(
     }
 
     // --- NURSE (mirrors NurseDashboard + Patients staff actions) ---
+    case "get_my_assigned_patients": {
+      if (uRole !== "nurse" && uRole !== "doctor" && uRole !== "admin") {
+        return { error: "Unauthorized" };
+      }
+      if (uRole === "admin") {
+        return {
+          error: "Administrators are not assigned a patient caseload. Use get_ward_roster for the full clinic roster or assign_patient_care_team to change assignments.",
+        };
+      }
+      const allPatients = await db.get("/api/dbserver/patients");
+      const assigned = filterPatientsAssignedToClinician(
+        Array.isArray(allPatients) ? allPatients : [],
+        uId,
+        uRole
+      );
+      const patients = assigned.map(toAssignedPatientSummary);
+      return {
+        count: patients.length,
+        clinicianId: uId,
+        role: uRole,
+        patients,
+      };
+    }
+
     case "get_ward_roster":
       if (uRole !== "nurse" && uRole !== "doctor" && uRole !== "admin") {
         return { error: "Unauthorized access to ward roster" };

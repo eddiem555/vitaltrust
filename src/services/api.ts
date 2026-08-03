@@ -117,6 +117,39 @@ export const api = {
     return handleResponse(res);
   },
 
+  async getDuoSsoConfig() {
+    const res = await fetch(`/api/auth/duo/config`);
+    return handleResponse(res);
+  },
+
+  async saveDuoSsoConfig(payload: {
+    issuerUrl: string;
+    clientId: string;
+    clientSecret?: string;
+    requesterRole: string;
+  }) {
+    const res = await fetch(`/api/auth/duo/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return handleResponseSafe(res);
+  },
+
+  async testDuoSsoConfig(payload: {
+    issuerUrl?: string;
+    clientId?: string;
+    clientSecret?: string;
+    requesterRole: string;
+  }) {
+    const res = await fetch(`/api/auth/duo/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return handleResponseSafe(res);
+  },
+
   async updateUserProfile(userData: { 
     id: string; 
     realName: string; 

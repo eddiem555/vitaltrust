@@ -10,18 +10,16 @@ echo "============================================="
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/.."
 
-ENV_FILE=".env"
-if [ -f "$ENV_FILE" ]; then
-    echo "[INFO] Found .env file at $(pwd)/$ENV_FILE. Will pass to container."
+ENV_FILE=""
+if [ -f ".env" ]; then
+    ENV_FILE=".env"
+    echo "[INFO] Found .env file at $(pwd)/$ENV_FILE. Will pass optional secrets to container."
+elif [ -f "./deployment/.env" ]; then
+    ENV_FILE="./deployment/.env"
+    echo "[INFO] Found .env at $ENV_FILE. Will pass optional secrets to container."
 else
-    echo "[WARNING] No .env file found in $(pwd). Attempting helper searches..."
-    if [ -f "./deployment/.env" ]; then
-        ENV_FILE="./deployment/.env"
-    else
-        echo "[INFO] No .env found; creating minimal .env (add Duo/API keys as needed). Node role is configured via Settings UI / deployment_config.json."
-        echo "NODE_ENV=production" > .env
-        ENV_FILE=".env"
-    fi
+    echo "[INFO] No .env file found. Container will start with NODE_ENV=production only."
+    echo "[INFO] Configure Duo/API keys via optional .env, or use Settings UI and first-login password bootstrap."
 fi
 
 # Locate Dockerfile
@@ -41,13 +39,14 @@ reset_db_artifact() {
   fi
 }
 
-for artifact in "persistent_db.json" "deployment_config.json" "system_console.log"; do
+for artifact in "persistent_db.json" "deployment_config.json" "system_console.log" "boot_instance.id" "duo_sso_config.json" "local_auth_config.json"; do
   reset_db_artifact "$(pwd)/$artifact"
 done
 
 # Common host paths when refreshing from /tmp/vitaltrust or a persistent checkout
 reset_db_artifact "/home/ubuntu/vitaltrust/persistent_db.json"
 reset_db_artifact "/tmp/vitaltrust/persistent_db.json"
+reset_db_artifact "/tmp/vitaltrust/boot_instance.id"
 
 echo "[1/3] Building VitalTrust Docker Image..."
 docker build -t vitaltrust-app -f "$DOCKER_FILE" .
@@ -60,13 +59,19 @@ docker rm vitaltrust-container vitaltrust-app 2>/dev/null || true
 docker network create vitaltrust-net 2>/dev/null || true
 
 echo "[3/3] Launching VitalTrust Container on vitaltrust-net..."
-docker run -d \
-  --name vitaltrust-app \
-  -p 3000:3000 \
-  --env-file "$ENV_FILE" \
-  --network vitaltrust-net \
-  --restart unless-stopped \
-  vitaltrust-app
+DOCKER_RUN_ARGS=(
+  -d
+  --name vitaltrust-app
+  -p 3000:3000
+  --network vitaltrust-net
+  --restart unless-stopped
+  -e NODE_ENV=production
+)
+if [ -n "$ENV_FILE" ]; then
+  DOCKER_RUN_ARGS+=(--env-file "$ENV_FILE")
+fi
+
+docker run "${DOCKER_RUN_ARGS[@]}" vitaltrust-app
 
 echo "---------------------------------------------"
 echo "GATEWAY CHECK: Checking Nginx Proxy Manager (NPM)..."
