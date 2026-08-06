@@ -200,7 +200,7 @@ export default function App() {
           </div>
           <div className="flex flex-col">
             <h1 className="text-xl font-bold tracking-tight text-white leading-tight">Vital Trust</h1>
-            <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none">Medical Center</p>
+            <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none">EHR Security Lab</p>
           </div>
         </div>
 

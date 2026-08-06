@@ -1946,7 +1946,7 @@ export default function AISettings({ user }: { user: User }) {
                       <ShieldCheck size={20} />
                     </div>
                     <div>
-                      <h5 className="font-bold text-slate-800 text-xs uppercase tracking-wide">Threat Mitigation Gateway</h5>
+                      <h5 className="font-bold text-slate-800 text-xs uppercase tracking-wide">AI Defense Runtime Guardrails</h5>
                       <p className="text-xs text-slate-500 mt-1 leading-relaxed font-semibold">
                         Cisco AI Defense intercepts model prompt payloads. It protects operations against Prompt Injections, formatting traps, and leaks of protected clinical SSNs or patient metadata dynamically.
                       </p>
@@ -2427,40 +2427,6 @@ export default function AISettings({ user }: { user: User }) {
               </div>
             </div>
 
-            {/* Attack vs Defense Security Matrix */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xl space-y-4">
-              <h4 className="text-xs font-black uppercase text-slate-500 tracking-wider">
-                Threat Matrix: Attack vector vs Cisco Defense policy
-              </h4>
-              <div className="overflow-x-auto border border-slate-100 rounded-xl">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
-                      <th className="p-4">Attack Vector Description</th>
-                      <th className="p-4">Secure Threat Outcome</th>
-                      <th className="p-4">Cisco Security Control Method</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-600 font-medium font-semibold">
-                    <tr>
-                      <td className="p-4 font-bold text-slate-700">Prompt Hijack / Injection</td>
-                      <td className="p-4">Malicious prompt neutralized. System disclaimer applied.</td>
-                      <td className="p-4"><span className="bg-amber-100/60 text-amber-800 px-2 py-0.5 rounded text-[10px] font-black uppercase">Cisco AI Defense Inspection</span></td>
-                    </tr>
-                    <tr>
-                      <td className="p-4 font-bold text-slate-700">Protected Patient PII Leak</td>
-                      <td className="p-4">Scanning triggers DLPs; intercepts social security numbers.</td>
-                      <td className="p-4"><span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-[10px] font-black uppercase">DLP Scanning Shield</span></td>
-                    </tr>
-                    <tr>
-                      <td className="p-4 font-bold text-slate-700">High-Risk SQL Injection</td>
-                      <td className="p-4">Isolated remote dbserver routes prevent query parameters leaks.</td>
-                      <td className="p-4"><span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-[10px] font-black uppercase">ZTNA Isolation connector</span></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </div>
         )}
       </div>

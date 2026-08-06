@@ -22,13 +22,10 @@ else
     echo "[INFO] Configure Duo/API keys via optional .env, or use Settings UI and first-login password bootstrap."
 fi
 
-# Locate Dockerfile
 DOCKER_FILE="deployment/Dockerfile"
-if [ ! -f "$DOCKER_FILE" ] && [ -f "deployment/Dockerfile.txt" ]; then
-    DOCKER_FILE="deployment/Dockerfile.txt"
-fi
-if [ ! -f "$DOCKER_FILE" ] && [ -f "Dockerfile" ]; then
-    DOCKER_FILE="Dockerfile"
+if [ ! -f "$DOCKER_FILE" ]; then
+    echo "[ERROR] Missing $DOCKER_FILE — cannot build VitalTrust image." >&2
+    exit 1
 fi
 
 # Safely reset local database/runtime cache before new container build (fresh seed from INITIAL_DB)
@@ -73,6 +70,45 @@ fi
 
 docker run "${DOCKER_RUN_ARGS[@]}" vitaltrust-app
 
+vt_has_sudo() {
+  sudo -n true 2>/dev/null || sudo true 2>/dev/null
+}
+
+vt_public_ip() {
+  if [ -n "${VITALTRUST_PUBLIC_IP:-}" ]; then
+    echo "$VITALTRUST_PUBLIC_IP"
+    return 0
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -4 -fsS --max-time 5 ifconfig.me 2>/dev/null | tr -d '[:space:]'
+    return 0
+  fi
+  echo ""
+}
+
+vt_install_student_scripts() {
+  local script src dest
+  if ! vt_has_sudo; then
+    echo "[WARN] sudo not available — install vt-start/vt-stop/vt-status to /usr/local/bin manually."
+    return 0
+  fi
+  for script in vt-start vt-stop vt-status; do
+    src="$SCRIPT_DIR/$script"
+    dest="/usr/local/bin/$script"
+    if [ ! -f "$src" ]; then
+      echo "[WARN] Missing $src — skipping $script"
+      continue
+    fi
+    sudo cp "$src" "$dest"
+    sudo chmod 755 "$dest"
+    echo "[INFO] Installed $dest"
+  done
+}
+
+echo "---------------------------------------------"
+echo "TRAINING SETUP: Installing student control scripts..."
+vt_install_student_scripts
+
 echo "---------------------------------------------"
 echo "GATEWAY CHECK: Checking Nginx Proxy Manager (NPM)..."
 if [ "$(docker inspect -f '{{.State.Running}}' nginx-proxy-manager 2>/dev/null)" = "true" ]; then
@@ -103,7 +139,12 @@ echo "---------------------------------------------"
 echo "HEALTH CHECK: Verifying container is active..."
 sleep 3
 if docker ps | grep -q "vitaltrust-app"; then
-    echo "[SUCCESS] VitalTrust container successfully deployed and listening on http://localhost:3000"
+    PUBLIC_IP="$(vt_public_ip)"
+    if [ -n "$PUBLIC_IP" ]; then
+      echo "[SUCCESS] VitalTrust instructor instance: http://${PUBLIC_IP}:3000"
+    else
+      echo "[SUCCESS] VitalTrust container successfully deployed and listening on http://localhost:3000"
+    fi
 else
     echo "[ERROR] Container failed to start. View logs with: docker logs vitaltrust-app"
 fi

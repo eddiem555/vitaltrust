@@ -1,0 +1,153 @@
+#!/bin/sh
+# Start a per-user VitalTrust training instance (CogniSphere-style port mapping).
+
+set -e
+
+vt_user_num() {
+  echo "$USER" | sed 's/[^0-9]*//g'
+}
+
+vt_host_port() {
+  num="$(vt_user_num)"
+  if [ -z "$num" ]; then
+    num=0
+  fi
+  echo $((3000 + num))
+}
+
+vt_container_name() {
+  if [ "$USER" = "ubuntu" ]; then
+    echo "vitaltrust-app"
+  else
+    echo "vitaltrust-${USER}"
+  fi
+}
+
+vt_image_name() {
+  echo "${VITALTRUST_IMAGE:-vitaltrust-app}"
+}
+
+vt_public_ip() {
+  if [ -n "${VITALTRUST_PUBLIC_IP:-}" ]; then
+    echo "$VITALTRUST_PUBLIC_IP"
+    return 0
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -4 -fsS --max-time 5 ifconfig.me 2>/dev/null | tr -d '[:space:]'
+    return 0
+  fi
+  echo ""
+}
+
+vt_app_url() {
+  port="$(vt_host_port)"
+  ip="$(vt_public_ip)"
+  if [ -z "$ip" ]; then
+    echo "(public IP unavailable — check network connectivity or set VITALTRUST_PUBLIC_IP)"
+  else
+    echo "http://${ip}:${port}"
+  fi
+}
+
+vt_env_file() {
+  if [ -f "$HOME/.env" ]; then
+    echo "$HOME/.env"
+  fi
+}
+
+vt_print_instance_info() {
+  state="${1:-unknown}"
+  url="$(vt_app_url)"
+  env_file="$(vt_env_file)"
+
+  echo "User:       $USER"
+  echo "Container:  $(vt_container_name)"
+  echo "Host port:  $(vt_host_port) -> container 3000"
+  echo "State:      $state"
+  echo "URL:        $url"
+  if [ -n "$env_file" ]; then
+    echo "Env file:   $env_file"
+  else
+    echo "Env file:   (none — optional $HOME/.env)"
+  fi
+}
+
+vt_require_docker() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "[ERROR] docker is not installed or not on PATH." >&2
+    exit 1
+  fi
+}
+
+vt_require_image() {
+  image="$(vt_image_name)"
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    echo "[ERROR] Docker image '$image' not found." >&2
+    echo "        Ask the instructor to run DeployVitalTrust.sh on this VM first." >&2
+    exit 1
+  fi
+}
+
+vt_warn_port_zero() {
+  if [ "$USER" = "ubuntu" ]; then
+    return 0
+  fi
+  num="$(vt_user_num)"
+  if [ -z "$num" ] || [ "$num" = "0" ]; then
+    echo "[WARN] Username has no digits — using host port 3000."
+    echo "[WARN] Port 3000 is reserved for the instructor shared instance."
+    echo "[WARN] Use a username with a unique number (for example aiuser12 -> port 3012)."
+  fi
+}
+
+vt_require_docker
+vt_require_image
+vt_warn_port_zero
+
+CONTAINER="$(vt_container_name)"
+HOST_PORT="$(vt_host_port)"
+IMAGE="$(vt_image_name)"
+ENV_FILE="$(vt_env_file)"
+
+if docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
+  echo "[INFO] Container '$CONTAINER' is already running."
+  vt_print_instance_info "running"
+  exit 0
+fi
+
+if docker ps -a --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
+  echo "[INFO] Starting existing container '$CONTAINER'..."
+  docker start "$CONTAINER" >/dev/null
+  vt_print_instance_info "running"
+  exit 0
+fi
+
+echo "[INFO] Creating container '$CONTAINER' on host port $HOST_PORT..."
+
+if [ -n "$ENV_FILE" ]; then
+  echo "[INFO] Loading environment from $ENV_FILE"
+  docker run -d \
+    --name "$CONTAINER" \
+    -p "${HOST_PORT}:3000" \
+    -e NODE_ENV=production \
+    --env-file "$ENV_FILE" \
+    "$IMAGE" >/dev/null
+else
+  echo "[INFO] No $HOME/.env found — starting with defaults."
+  echo "[INFO] Create $HOME/.env to pre-load API keys and AI Defense settings."
+  docker run -d \
+    --name "$CONTAINER" \
+    -p "${HOST_PORT}:3000" \
+    -e NODE_ENV=production \
+    "$IMAGE" >/dev/null
+fi
+
+sleep 2
+
+if docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
+  echo "[SUCCESS] VitalTrust is running."
+  vt_print_instance_info "running"
+else
+  echo "[ERROR] Container failed to start. Logs: docker logs $CONTAINER" >&2
+  exit 1
+fi

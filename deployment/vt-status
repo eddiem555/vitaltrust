@@ -1,0 +1,182 @@
+#!/bin/sh
+# Show status for the current user's VitalTrust training instance.
+#   vt-status       — this user's instance
+#   vt-status -all  — all VitalTrust containers on this host
+
+vt_user_num() {
+  echo "$USER" | sed 's/[^0-9]*//g'
+}
+
+vt_host_port() {
+  num="$(vt_user_num)"
+  if [ -z "$num" ]; then
+    num=0
+  fi
+  echo $((3000 + num))
+}
+
+vt_container_name() {
+  if [ "$USER" = "ubuntu" ]; then
+    echo "vitaltrust-app"
+  else
+    echo "vitaltrust-${USER}"
+  fi
+}
+
+vt_public_ip() {
+  if [ -n "${VITALTRUST_PUBLIC_IP:-}" ]; then
+    echo "$VITALTRUST_PUBLIC_IP"
+    return 0
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -4 -fsS --max-time 5 ifconfig.me 2>/dev/null | tr -d '[:space:]'
+    return 0
+  fi
+  echo ""
+}
+
+vt_app_url_for_port() {
+  port="$1"
+  ip="$(vt_public_ip)"
+  if [ -z "$ip" ]; then
+    echo "(public IP unavailable)"
+  else
+    echo "http://${ip}:${port}"
+  fi
+}
+
+vt_app_url() {
+  vt_app_url_for_port "$(vt_host_port)"
+}
+
+vt_env_file() {
+  if [ -f "$HOME/.env" ]; then
+    echo "$HOME/.env"
+  fi
+}
+
+vt_print_instance_info() {
+  state="${1:-unknown}"
+  env_file="$(vt_env_file)"
+
+  case "$state" in
+    running)
+      echo "User:       $USER"
+      echo "Container:  $(vt_container_name)"
+      echo "Host port:  $(vt_host_port) -> container 3000"
+      echo "State:      running"
+      echo "URL:        $(vt_app_url)"
+      if [ -n "$env_file" ]; then
+        echo "Env file:   $env_file"
+      else
+        echo "Env file:   (none — optional $HOME/.env)"
+      fi
+      ;;
+    stopped)
+      echo "User:       $USER"
+      echo "Container:  $(vt_container_name)"
+      echo "Host port:  $(vt_host_port) -> container 3000"
+      echo "State:      stopped"
+      echo "URL:        (not listening — run vt-start)"
+      if [ -n "$env_file" ]; then
+        echo "Env file:   $env_file"
+      else
+        echo "Env file:   (none — optional $HOME/.env)"
+      fi
+      ;;
+    *)
+      echo "VitalTrust is not running."
+      echo "Container:  $(vt_container_name) (not created)"
+      echo "Assigned port when started: $(vt_host_port)"
+      echo "Run: vt-start"
+      ;;
+  esac
+}
+
+vt_require_docker() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "[ERROR] docker is not installed or not on PATH." >&2
+    exit 1
+  fi
+}
+
+vt_status_all() {
+  ip="$(vt_public_ip)"
+  names="$(docker ps -a --filter "name=vitaltrust" --format '{{.Names}}')"
+
+  if [ -z "$names" ]; then
+    echo "All VitalTrust instances on this host:"
+    echo "(no vitaltrust containers found)"
+    exit 1
+  fi
+
+  echo "All VitalTrust instances on this host:"
+  if [ -n "$ip" ]; then
+    echo "Public IP:  $ip"
+  else
+    echo "Public IP:  (unavailable — URLs may be incomplete)"
+  fi
+  echo ""
+  printf "%-22s %-10s %-6s %s\n" "CONTAINER" "STATE" "PORT" "URL"
+  printf "%-22s %-10s %-6s %s\n" "----------------------" "----------" "------" "-------------------------"
+
+  echo "$names" | while read -r name; do
+    [ -z "$name" ] && continue
+    case "$name" in
+      vitaltrust|vitaltrust-* ) ;;
+      * ) continue ;;
+    esac
+
+    state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null)"
+    host_port="$(docker inspect -f '{{range $p, $conf := .NetworkSettings.Ports}}{{if eq $p "3000/tcp"}}{{if $conf}}{{(index $conf 0).HostPort}}{{end}}{{end}}{{end}}' "$name" 2>/dev/null)"
+
+    if [ "$state" = "running" ] && [ -n "$host_port" ]; then
+      url="$(vt_app_url_for_port "$host_port")"
+    elif [ -n "$host_port" ]; then
+      url="(not listening)"
+    else
+      host_port="-"
+      url="-"
+    fi
+
+    printf "%-22s %-10s %-6s %s\n" "$name" "$state" "$host_port" "$url"
+  done
+}
+
+vt_require_docker
+
+case "${1:-}" in
+  -all|--all)
+    vt_status_all
+    exit 0
+    ;;
+  -h|--help)
+    echo "Usage: vt-status [-all]"
+    echo "  vt-status       Show this user's VitalTrust instance"
+    echo "  vt-status -all  List all VitalTrust containers on this host"
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    echo "[ERROR] Unknown option: $1" >&2
+    echo "Usage: vt-status [-all]" >&2
+    exit 1
+    ;;
+esac
+
+CONTAINER="$(vt_container_name)"
+STATE="not created"
+
+if docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
+  STATE="running"
+elif docker ps -a --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
+  STATE="stopped"
+fi
+
+vt_print_instance_info "$STATE"
+
+if [ "$STATE" = "running" ]; then
+  exit 0
+fi
+exit 1
