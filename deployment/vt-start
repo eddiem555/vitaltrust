@@ -1,7 +1,11 @@
 #!/bin/sh
 # Start a per-user VitalTrust training instance (CogniSphere-style port mapping).
+#   vt-start         — start (or create) this user's instance
+#   vt-start --reset — remove container and recreate with factory-default data
 
 set -e
+
+RESET=0
 
 vt_user_num() {
   echo "$USER" | sed 's/[^0-9]*//g'
@@ -43,32 +47,22 @@ vt_app_url() {
   port="$(vt_host_port)"
   ip="$(vt_public_ip)"
   if [ -z "$ip" ]; then
-    echo "(public IP unavailable — check network connectivity or set VITALTRUST_PUBLIC_IP)"
+    echo "(public IP unavailable)"
   else
     echo "http://${ip}:${port}"
   fi
 }
 
+vt_print_running_details() {
+  echo "Container:  $(vt_container_name)"
+  echo "Host port:  $(vt_host_port) -> container 3000"
+  echo "State:      running"
+  echo "URL:        $(vt_app_url)"
+}
+
 vt_env_file() {
   if [ -f "$HOME/.env" ]; then
     echo "$HOME/.env"
-  fi
-}
-
-vt_print_instance_info() {
-  state="${1:-unknown}"
-  url="$(vt_app_url)"
-  env_file="$(vt_env_file)"
-
-  echo "User:       $USER"
-  echo "Container:  $(vt_container_name)"
-  echo "Host port:  $(vt_host_port) -> container 3000"
-  echo "State:      $state"
-  echo "URL:        $url"
-  if [ -n "$env_file" ]; then
-    echo "Env file:   $env_file"
-  else
-    echo "Env file:   (none — optional $HOME/.env)"
   fi
 }
 
@@ -94,11 +88,88 @@ vt_warn_port_zero() {
   fi
   num="$(vt_user_num)"
   if [ -z "$num" ] || [ "$num" = "0" ]; then
-    echo "[WARN] Username has no digits — using host port 3000."
-    echo "[WARN] Port 3000 is reserved for the instructor shared instance."
-    echo "[WARN] Use a username with a unique number (for example aiuser12 -> port 3012)."
+    echo "[WARN] Username has no digits — using host port 3000." >&2
+    echo "[WARN] Port 3000 is reserved for the instructor shared instance." >&2
+    echo "[WARN] Use a username with a unique number (for example aiuser12 -> port 3012)." >&2
   fi
 }
+
+vt_usage() {
+  echo "Usage: vt-start [--reset]"
+  echo "  vt-start         Start this user's VitalTrust instance"
+  echo "  vt-start --reset Factory reset — delete container data and recreate fresh"
+}
+
+vt_parse_args() {
+  for arg in "$@"; do
+    case "$arg" in
+      --reset|-reset)
+        RESET=1
+        ;;
+      -h|--help)
+        vt_usage
+        exit 0
+        ;;
+      *)
+        echo "[ERROR] Unknown option: $arg" >&2
+        vt_usage >&2
+        exit 1
+        ;;
+    esac
+  done
+}
+
+vt_confirm_reset() {
+  echo "[WARN] Factory reset removes your VitalTrust container and all data inside it."
+  echo "       You will return to the first-time admin password setup screen."
+  if [ "$USER" = "ubuntu" ]; then
+    echo "[WARN] This resets the shared instructor instance (vitaltrust-app)."
+  fi
+  printf "Continue? [y/N] "
+  read -r reply
+  case "$reply" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    *)
+      echo "Reset cancelled."
+      exit 0
+      ;;
+  esac
+}
+
+vt_remove_container() {
+  container="$1"
+  if docker ps -a --format '{{.Names}}' | grep -Fxq "$container"; then
+    echo "[INFO] Removing container '$container'..."
+    docker rm -f "$container" >/dev/null
+  fi
+}
+
+vt_create_container() {
+  container="$1"
+  host_port="$2"
+  image="$3"
+  env_file="$4"
+
+  if [ -n "$env_file" ]; then
+    echo "[INFO] Loading environment from $env_file"
+    docker run -d \
+      --name "$container" \
+      -p "${host_port}:3000" \
+      -e NODE_ENV=production \
+      --env-file "$env_file" \
+      "$image" >/dev/null
+  else
+    docker run -d \
+      --name "$container" \
+      -p "${host_port}:3000" \
+      -e NODE_ENV=production \
+      "$image" >/dev/null
+  fi
+}
+
+vt_parse_args "$@"
 
 vt_require_docker
 vt_require_image
@@ -109,44 +180,36 @@ HOST_PORT="$(vt_host_port)"
 IMAGE="$(vt_image_name)"
 ENV_FILE="$(vt_env_file)"
 
-if docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
-  echo "[INFO] Container '$CONTAINER' is already running."
-  vt_print_instance_info "running"
-  exit 0
-fi
-
-if docker ps -a --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
-  echo "[INFO] Starting existing container '$CONTAINER'..."
-  docker start "$CONTAINER" >/dev/null
-  vt_print_instance_info "running"
-  exit 0
-fi
-
-echo "[INFO] Creating container '$CONTAINER' on host port $HOST_PORT..."
-
-if [ -n "$ENV_FILE" ]; then
-  echo "[INFO] Loading environment from $ENV_FILE"
-  docker run -d \
-    --name "$CONTAINER" \
-    -p "${HOST_PORT}:3000" \
-    -e NODE_ENV=production \
-    --env-file "$ENV_FILE" \
-    "$IMAGE" >/dev/null
+if [ "$RESET" -eq 1 ]; then
+  vt_confirm_reset
+  vt_remove_container "$CONTAINER"
+  echo "Starting Vital Trust (factory reset)"
+  vt_create_container "$CONTAINER" "$HOST_PORT" "$IMAGE" "$ENV_FILE"
 else
-  echo "[INFO] No $HOME/.env found — starting with defaults."
-  echo "[INFO] Create $HOME/.env to pre-load API keys and AI Defense settings."
-  docker run -d \
-    --name "$CONTAINER" \
-    -p "${HOST_PORT}:3000" \
-    -e NODE_ENV=production \
-    "$IMAGE" >/dev/null
+  if docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
+    echo "Vital Trust already running"
+    vt_print_running_details
+    exit 0
+  fi
+
+  echo "Starting Vital Trust"
+
+  if docker ps -a --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
+    docker start "$CONTAINER" >/dev/null
+  else
+    vt_create_container "$CONTAINER" "$HOST_PORT" "$IMAGE" "$ENV_FILE"
+  fi
 fi
 
 sleep 2
 
 if docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
-  echo "[SUCCESS] VitalTrust is running."
-  vt_print_instance_info "running"
+  if [ "$RESET" -eq 1 ]; then
+    echo "Vital Trust is running (factory reset complete)"
+  else
+    echo "Vital Trust is running"
+  fi
+  vt_print_running_details
 else
   echo "[ERROR] Container failed to start. Logs: docker logs $CONTAINER" >&2
   exit 1

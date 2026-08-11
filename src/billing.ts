@@ -1,4 +1,4 @@
-import { careTeamForPatientIndex } from './appointments';
+import { careTeamForPatientIndex, SEED_REFERENCE_DATE } from './appointments';
 import { BillingRecord } from './types';
 
 const BILL_DESC = [
@@ -41,9 +41,6 @@ const NURSE_NAMES: Record<string, string> = {
   nurse: 'Nurse Demo',
 };
 
-/** Reference date for seed data (matches VERSION_DATE). */
-const SEED_TODAY = new Date('2026-06-16T12:00:00Z');
-
 function formatDate(d: Date): string {
   return d.toISOString().split('T')[0];
 }
@@ -57,17 +54,18 @@ function clinicianForBill(patientNum: number, billIndex: number, primaryDoctorId
   return { doctorId: `doctor${docIdx}`, nurseId: `nurse${nurseIdx}` };
 }
 
+/** Past billing statements — at least 2 per patient; counts vary by patient (2–12). */
 export function buildInitialBilling(): BillingRecord[] {
   const bills: BillingRecord[] = [];
 
   for (let i = 1; i <= 50; i++) {
-    const count = 3 + (i % 8); // 3–10 bills per patient
+    const count = 2 + ((i * 7 + i * i) % 11);
     const { doctorId: primaryDoctorId, nurseId: primaryNurseId } = careTeamForPatientIndex(i);
 
     for (let j = 0; j < count; j++) {
-      const daysBack = 14 + j * 110 + (i * 17) % 365;
-      const billDate = new Date(SEED_TODAY);
-      billDate.setUTCDate(billDate.getUTCDate() - Math.min(daysBack, 365 * 3));
+      const daysBack = 10 + j * 45 + (i * 13) % 320;
+      const billDate = new Date(SEED_REFERENCE_DATE);
+      billDate.setUTCDate(billDate.getUTCDate() - Math.min(daysBack, 365 * 2));
 
       const { doctorId, nurseId } = clinicianForBill(i, j, primaryDoctorId, primaryNurseId);
 
@@ -86,9 +84,10 @@ export function buildInitialBilling(): BillingRecord[] {
     }
   }
 
-  for (let j = 0; j < 4; j++) {
-    const daysBack = 30 + j * 90;
-    const billDate = new Date(SEED_TODAY);
+  const demoBillCount = 2 + (3 % 3);
+  for (let j = 0; j < demoBillCount; j++) {
+    const daysBack = 14 + j * 60;
+    const billDate = new Date(SEED_REFERENCE_DATE);
     billDate.setUTCDate(billDate.getUTCDate() - daysBack);
     bills.push({
       id: `bill_patient_demo_${j}`,

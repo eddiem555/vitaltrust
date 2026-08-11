@@ -5,68 +5,11 @@
 
 set -e
 
-vt_user_num() {
-  echo "$USER" | sed 's/[^0-9]*//g'
-}
-
-vt_host_port() {
-  num="$(vt_user_num)"
-  if [ -z "$num" ]; then
-    num=0
-  fi
-  echo $((3000 + num))
-}
-
 vt_container_name() {
   if [ "$USER" = "ubuntu" ]; then
     echo "vitaltrust-app"
   else
     echo "vitaltrust-${USER}"
-  fi
-}
-
-vt_public_ip() {
-  if [ -n "${VITALTRUST_PUBLIC_IP:-}" ]; then
-    echo "$VITALTRUST_PUBLIC_IP"
-    return 0
-  fi
-  if command -v curl >/dev/null 2>&1; then
-    curl -4 -fsS --max-time 5 ifconfig.me 2>/dev/null | tr -d '[:space:]'
-    return 0
-  fi
-  echo ""
-}
-
-vt_app_url() {
-  port="$(vt_host_port)"
-  ip="$(vt_public_ip)"
-  if [ -z "$ip" ]; then
-    echo "(public IP unavailable — check network connectivity or set VITALTRUST_PUBLIC_IP)"
-  else
-    echo "http://${ip}:${port}"
-  fi
-}
-
-vt_env_file() {
-  if [ -f "$HOME/.env" ]; then
-    echo "$HOME/.env"
-  fi
-}
-
-vt_print_instance_info() {
-  state="${1:-unknown}"
-  url="$(vt_app_url)"
-  env_file="$(vt_env_file)"
-
-  echo "User:       $USER"
-  echo "Container:  $(vt_container_name)"
-  echo "Host port:  $(vt_host_port) -> container 3000"
-  echo "State:      $state"
-  echo "URL:        $url"
-  if [ -n "$env_file" ]; then
-    echo "Env file:   $env_file"
-  else
-    echo "Env file:   (none — optional $HOME/.env)"
   fi
 }
 
@@ -88,15 +31,13 @@ vt_can_stop_all() {
 }
 
 vt_stop_all() {
-  stopped=0
-
   if ! vt_can_stop_all; then
     echo "[ERROR] vt-stop -all is restricted to the ubuntu user or sudo." >&2
     echo "        Run as ubuntu or: sudo vt-stop -all" >&2
     exit 1
   fi
 
-  echo "[INFO] Stopping all running VitalTrust containers..."
+  echo "Stopping all Vital Trust instances"
 
   docker ps --filter "name=vitaltrust" --format '{{.Names}}' | while read -r name; do
     [ -z "$name" ] && continue
@@ -105,16 +46,14 @@ vt_stop_all() {
       * ) continue ;;
     esac
     docker stop "$name" >/dev/null
-    echo "[INFO] Stopped $name"
-    stopped=$((stopped + 1))
+    echo "Stopped $name"
   done
 
-  # Subshell counter won't propagate; recount for summary
   running="$(docker ps --filter "name=vitaltrust" --format '{{.Names}}' | wc -l | tr -d ' ')"
   if [ "$running" = "0" ]; then
-    echo "[SUCCESS] All VitalTrust instances stopped."
+    echo "All Vital Trust instances stopped"
   else
-    echo "[WARN] Some containers may still be running. Check: vt-status -all"
+    echo "[WARN] Some containers may still be running. Check: vt-status -all" >&2
     exit 1
   fi
 }
@@ -144,15 +83,14 @@ esac
 CONTAINER="$(vt_container_name)"
 
 if ! docker ps -a --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
-  echo "[INFO] No container named '$CONTAINER'."
+  echo "Vital Trust not running"
   exit 0
 fi
 
-if docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
-  docker stop "$CONTAINER" >/dev/null
-  echo "[INFO] Stopped '$CONTAINER'."
-else
-  echo "[INFO] Container '$CONTAINER' is already stopped."
+if ! docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER"; then
+  echo "Vital Trust not running"
+  exit 0
 fi
 
-vt_print_instance_info "stopped"
+echo "Stopping Vital Trust"
+docker stop "$CONTAINER" >/dev/null

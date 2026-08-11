@@ -147,7 +147,7 @@ const DEMO_PATIENT = {
   dob: '1995-03-15',
   ssn: '999-00-1234',
   insurance_id: 'BCBS-DEMO-5001',
-  lastVisit: '2026-05-01',
+  lastVisit: '2026-07-12',
 };
 
 function buildUsers(defaultPasswordHash: string) {
