@@ -4,6 +4,7 @@ import { Send, Bot, Database, Sparkles, User as UserIcon, Lock, Key, Settings, A
 import { migrateEolBedrockModelId, stripBedrockUiPrefix } from '../../bedrock-models';
 import { migrateEolClaudeModelId, stripClaudeUiPrefix } from '../../claude-models';
 import { User } from '../../types';
+import { applyInstanceSettingsToClientStorage } from '../../instance-settings-sync';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -82,33 +83,43 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   const [chatBootSynced, setChatBootSynced] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Load initially on mount (client settings synced at App boot via boot instance id)
+  // Load initially on mount (instance settings synced at App boot; refresh here too)
   useEffect(() => {
-    const storedModel = localStorage.getItem('vt_ai_selected_model') || 'OpenAI GPT-5';
-    if (storedModel.toLowerCase().includes('bedrock')) {
-      const migrated = `Bedrock - ${migrateEolBedrockModelId(stripBedrockUiPrefix(storedModel))}`;
-      setSelectedModel(migrated);
-      if (migrated !== storedModel) {
-        localStorage.setItem('vt_ai_selected_model', migrated);
+    const hydrateFromLocalStorage = () => {
+      const storedModel = localStorage.getItem('vt_ai_selected_model') || 'OpenAI GPT-5';
+      if (storedModel.toLowerCase().includes('bedrock')) {
+        const migrated = `Bedrock - ${migrateEolBedrockModelId(stripBedrockUiPrefix(storedModel))}`;
+        setSelectedModel(migrated);
+        if (migrated !== storedModel) {
+          localStorage.setItem('vt_ai_selected_model', migrated);
+        }
+      } else if (storedModel.toLowerCase().startsWith('claude -')) {
+        const migrated = `Claude - ${migrateEolClaudeModelId(stripClaudeUiPrefix(storedModel))}`;
+        setSelectedModel(migrated);
+        if (migrated !== storedModel) {
+          localStorage.setItem('vt_ai_selected_model', migrated);
+        }
+      } else {
+        setSelectedModel(storedModel);
       }
-    } else if (storedModel.toLowerCase().startsWith('claude -')) {
-      const migrated = `Claude - ${migrateEolClaudeModelId(stripClaudeUiPrefix(storedModel))}`;
-      setSelectedModel(migrated);
-      if (migrated !== storedModel) {
-        localStorage.setItem('vt_ai_selected_model', migrated);
-      }
-    } else {
-      setSelectedModel(storedModel);
-    }
-    setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
-    setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
-    setGeminiKey(localStorage.getItem('vt_ai_gemini_key') || '');
-    setClaudeKey(localStorage.getItem('vt_ai_claude_key') || '');
-    setAwsRegion(localStorage.getItem('vt_ai_aws_region') || 'us-east-1');
-    setAwsAccessKey(localStorage.getItem('vt_ai_aws_access_key') || '');
-    setAwsSecretKey(localStorage.getItem('vt_ai_aws_secret_key') || '');
-    setAwsCustomDns(localStorage.getItem('vt_ai_aws_custom_dns') || 'null');
-    setAiDefenseEnabled(localStorage.getItem('vt_ai_defense_enabled') === 'true');
+      setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
+      setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
+      setGeminiKey(localStorage.getItem('vt_ai_gemini_key') || '');
+      setClaudeKey(localStorage.getItem('vt_ai_claude_key') || '');
+      setAwsRegion(localStorage.getItem('vt_ai_aws_region') || 'us-east-1');
+      setAwsAccessKey(localStorage.getItem('vt_ai_aws_access_key') || '');
+      setAwsSecretKey(localStorage.getItem('vt_ai_aws_secret_key') || '');
+      setAwsCustomDns(localStorage.getItem('vt_ai_aws_custom_dns') || 'null');
+      setAiDefenseEnabled(localStorage.getItem('vt_ai_defense_enabled') === 'true');
+    };
+
+    fetch('/api/settings/instance')
+      .then((res) => res.json())
+      .then((data) => {
+        applyInstanceSettingsToClientStorage(data);
+        hydrateFromLocalStorage();
+      })
+      .catch(() => hydrateFromLocalStorage());
 
     fetch('/api/ai/config')
       .then(res => res.json())
@@ -130,14 +141,22 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   }, []);
 
   useEffect(() => {
-    const updateDefenseState = () => {
+    const refreshClientSettings = () => {
+      setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
+      setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
+      setGeminiKey(localStorage.getItem('vt_ai_gemini_key') || '');
+      setClaudeKey(localStorage.getItem('vt_ai_claude_key') || '');
+      setAwsRegion(localStorage.getItem('vt_ai_aws_region') || 'us-east-1');
+      setAwsAccessKey(localStorage.getItem('vt_ai_aws_access_key') || '');
+      setAwsSecretKey(localStorage.getItem('vt_ai_aws_secret_key') || '');
+      setAwsCustomDns(localStorage.getItem('vt_ai_aws_custom_dns') || 'null');
       setAiDefenseEnabled(localStorage.getItem('vt_ai_defense_enabled') === 'true');
     };
-    window.addEventListener('storage', updateDefenseState);
-    window.addEventListener('vt_settings_updated', updateDefenseState);
+    window.addEventListener('storage', refreshClientSettings);
+    window.addEventListener('vt_settings_updated', refreshClientSettings);
     return () => {
-      window.removeEventListener('storage', updateDefenseState);
-      window.removeEventListener('vt_settings_updated', updateDefenseState);
+      window.removeEventListener('storage', refreshClientSettings);
+      window.removeEventListener('vt_settings_updated', refreshClientSettings);
     };
   }, []);
 

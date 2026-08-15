@@ -150,6 +150,20 @@ export const api = {
     return handleResponseSafe(res);
   },
 
+  async getInstanceSettings() {
+    const res = await fetch(`/api/settings/instance`);
+    return handleResponse(res);
+  },
+
+  async saveInstanceSettings(payload: Record<string, unknown> & { requesterRole: string }) {
+    const res = await fetch(`/api/settings/instance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return handleResponseSafe(res);
+  },
+
   async updateUserProfile(userData: { 
     id: string; 
     realName: string; 

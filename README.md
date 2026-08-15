@@ -1,6 +1,6 @@
 # VitalTrust
 
-**Version:** 3.2.110 · **Release date:** 2026-08-08
+**Version:** 3.2.112 · **Release date:** 2026-08-14
 
 VitalTrust is a **mock Electronic Health Record (EHR) portal** built for security architecture labs and Cisco portfolio demonstrations. It looks and behaves like a small healthcare application—patients, clinicians, appointments, billing, messaging, and an AI assistant—but it is **not** a real clinical system and must never be used to store or process actual PHI.
 
@@ -205,7 +205,7 @@ cp .env.example .env
 
 **Note:** Do not wrap `.env` values in quotes when using Docker `--env-file`.
 
-Settings saved in the UI **override** environment variables for Duo SSO and take precedence for AI keys stored in browser localStorage during chat sessions.
+Settings saved in the UI are stored on the **server** for the whole instance (`instance_settings.json`, `duo_sso_config.json`) so every browser and user sees the same AI and Security configuration. Browser localStorage is used as a runtime cache and is hydrated from the server on load.
 
 ---
 
@@ -250,6 +250,7 @@ External clients without identity headers use `MCP_DEMO_USER_ID` / `MCP_DEMO_ROL
 | `persistent_db.json` | Runtime database (seeded from `src/db.ts` on first run) |
 | `deployment_config.json` | Distributed topology settings |
 | `duo_sso_config.json` | Duo OIDC credentials saved from Settings |
+| `instance_settings.json` | Instance-wide AI assistant and Security Controls settings |
 | `local_auth_config.json` | Bootstrap / local auth state |
 | `boot_instance.id` | Detects container recreation to reset browser settings |
 

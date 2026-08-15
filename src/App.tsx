@@ -30,6 +30,7 @@ import { User } from './types';
 import { api } from './services/api';
 import { VERSION, VERSION_DATE } from './version';
 import { syncClientStorageWithBootInstance } from './client-boot-sync';
+import { applyInstanceSettingsToClientStorage } from './instance-settings-sync';
 
 // Components
 import Login from './components/auth/Login';
@@ -56,12 +57,21 @@ export default function App() {
   useEffect(() => {
     fetch('/api/ai/config')
       .then((res) => res.json())
-      .then((data) => {
+      .then(async (data) => {
         if (data?.bootInstanceId) {
           const didReset = syncClientStorageWithBootInstance(data.bootInstanceId);
           if (didReset) {
             console.info('[VitalTrust] New server boot instance — client settings reset to defaults.');
           }
+        }
+        try {
+          const settingsRes = await fetch('/api/settings/instance');
+          const settings = await settingsRes.json();
+          if (applyInstanceSettingsToClientStorage(settings)) {
+            console.info('[VitalTrust] Loaded instance-wide AI and Security settings from server.');
+          }
+        } catch (err) {
+          console.error('Instance settings sync failed:', err);
         }
         setBootSyncReady(true);
       })

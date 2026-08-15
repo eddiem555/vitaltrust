@@ -24,6 +24,12 @@ import {
   resolveDuoSsoCredentials,
   saveDuoSsoConfig,
 } from "./duo-sso-config";
+import {
+  getInstanceSettingsForUi,
+  resolveChatAiDefenseSettings,
+  resolveChatApiKeys,
+  saveInstanceSettings,
+} from "./instance-settings-config";
 import fs from "fs";
 import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
@@ -1184,6 +1190,32 @@ async function startServer() {
         success: false,
         message: err?.message || "Duo OIDC discovery failed. Verify issuer URL and application credentials.",
       });
+    }
+  });
+
+  app.get("/api/settings/instance", (_req, res) => {
+    res.json(getInstanceSettingsForUi());
+  });
+
+  app.post("/api/settings/instance", (req, res) => {
+    const requesterRole = String(req.body?.requesterRole || "").toLowerCase();
+    if (requesterRole !== "admin") {
+      return res.status(403).json({ success: false, error: "Only administrators can update instance settings." });
+    }
+    try {
+      saveInstanceSettings(req.body || {});
+      createLog(
+        "admin",
+        "Settings",
+        "admin",
+        "Instance AI & Security Settings Updated",
+        "Success",
+        "Instance-wide AI assistant and Security Controls settings saved for all users and browsers.",
+        req
+      );
+      res.json({ success: true, settings: getInstanceSettingsForUi() });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err?.message || String(err) });
     }
   });
 
@@ -2510,6 +2542,7 @@ async function startServer() {
         activeProvider,
         bootInstanceId: BOOT_INSTANCE_ID,
         version: VERSION,
+        instanceSettingsConfigured: getInstanceSettingsForUi().configured,
       });
     });
 
@@ -2809,9 +2842,31 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
         aiDefenseMode
       } = req.body;
 
-      const isAiDefenseOn = aiDefenseEnabled === true || aiDefenseEnabled === "true" || enableAiDefense === true || enableAiDefense === "true";
-      const rawDefenseUrlSetting = (aiDefenseGatewayUrl || aiDefenseGateway || "").trim();
-      const defenseModeLabel = (aiDefenseMode || "Via API").trim();
+      const resolvedApiKeys = resolveChatApiKeys(apiKeys);
+      const resolvedDefense = resolveChatAiDefenseSettings({
+        aiDefenseEnabled,
+        aiDefenseMode,
+        aiDefenseGateway,
+        aiDefenseGatewayUrl,
+        aiDefenseApiKey,
+        aiDefensePromptSource,
+        aiDefenseRules,
+      });
+
+      const isAiDefenseOn =
+        resolvedDefense.aiDefenseEnabled ||
+        aiDefenseEnabled === true ||
+        aiDefenseEnabled === "true" ||
+        enableAiDefense === true ||
+        enableAiDefense === "true";
+      const rawDefenseUrlSetting = (
+        resolvedDefense.aiDefenseGatewayUrl ||
+        resolvedDefense.aiDefenseGateway ||
+        aiDefenseGatewayUrl ||
+        aiDefenseGateway ||
+        ""
+      ).trim();
+      const defenseModeLabel = (resolvedDefense.aiDefenseMode || aiDefenseMode || "Via API").trim();
       const proxyLlmViaDefenseGateway = shouldProxyLlmThroughAiDefense(
         isAiDefenseOn,
         rawDefenseUrlSetting,
@@ -2840,7 +2895,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
         );
       }
 
-      const targetModelName = selectedModel || "OpenAI GPT-5";
+      const targetModelName = selectedModel || resolvedDefense.selectedModel || "OpenAI GPT-5";
       const cleanedModel = targetModelName.toLowerCase();
       const uId = userId || "unknown_patient";
       const uName = userName || "Unknown Patient";
@@ -2856,7 +2911,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
       let blockType = "Cisco AI Defense Content Guardrail";
 
       // Resolve the API key from environment variable or client payload (API mode only)
-      const activeDefenseApiKey = (aiDefenseApiKey || "").trim() || (process.env.CISCO_AI_DEFENSE_API_KEY || process.env.AI_DEFENSE_API_KEY || "").trim();
+      const activeDefenseApiKey = resolvedDefense.aiDefenseApiKey;
 
       if (isAiDefenseOn && !proxyLlmViaDefenseGateway && !activeDefenseApiKey) {
         console.error("[AI_DEFENSE] AI Defense is enabled but no API key is configured.");
@@ -2884,7 +2939,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             body: JSON.stringify({
               messages: [{ role: "user", content: message }],
               policy: {
-                rules: Object.entries(aiDefenseRules || {}).map(([ruleName, ruleConfig]: [string, any]) => ({
+                rules: Object.entries(resolvedDefense.aiDefenseRules || aiDefenseRules || {}).map(([ruleName, ruleConfig]: [string, any]) => ({
                   name: ruleName,
                   enabled: ruleConfig?.enabled === true || ruleConfig?.enabled === 'true',
                   action: ruleConfig?.action || 'Ignore'
@@ -3090,7 +3145,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
 
       try {
         if (targetModelFamily === 'openai') {
-          const openaiKey = apiKeys?.openaiKey?.trim() || process.env.OPENAI_API_KEY?.trim();
+          const openaiKey = resolvedApiKeys.openaiKey;
           if (!openaiKey) {
             throw new Error("OpenAI API Key is missing. Please enter it in the settings panel.");
           }
@@ -3240,7 +3295,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
           });
 
         } else if (targetModelFamily === 'groq') {
-          const groqKey = apiKeys?.groqKey?.trim() || process.env.GROQ_API_KEY?.trim();
+          const groqKey = resolvedApiKeys.groqKey;
           if (!groqKey) {
             throw new Error("Groq API Key is missing. Please enter it in the settings panel.");
           }
@@ -3372,7 +3427,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
           });
 
         } else if (targetModelFamily === 'gemini') {
-          const geminiKey = apiKeys?.geminiKey?.trim() || process.env.GEMINI_API_KEY?.trim();
+          const geminiKey = resolvedApiKeys.geminiKey;
           if (!geminiKey) {
             throw new Error("Gemini API Key is missing. Please enter it in the settings panel.");
           }
@@ -3417,7 +3472,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
           });
 
         } else if (targetModelFamily === 'claude') {
-          const claudeKey = apiKeys?.claudeKey?.trim() || process.env.CLAUDE_API_KEY?.trim();
+          const claudeKey = resolvedApiKeys.claudeKey;
           if (!claudeKey) {
             throw new Error("Claude API Key is missing. Please enter it in AI Settings or set CLAUDE_API_KEY in .env.");
           }
@@ -3458,10 +3513,10 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
           });
 
         } else if (targetModelFamily === 'bedrock') {
-          const awsAccessKey = apiKeys?.awsAccessKey?.trim() || process.env.AWS_ACCESS_KEY?.trim();
-          const awsSecretKey = apiKeys?.awsSecretKey?.trim() || process.env.AWS_SECRET_KEY?.trim();
-          const awsRegion = apiKeys?.awsRegion?.trim() || process.env.AWS_REGION?.trim() || "us-east-1";
-          let awsCustomDns = apiKeys?.awsCustomDns?.trim() || "";
+          const awsAccessKey = resolvedApiKeys.awsAccessKey;
+          const awsSecretKey = resolvedApiKeys.awsSecretKey;
+          const awsRegion = resolvedApiKeys.awsRegion;
+          let awsCustomDns = resolvedApiKeys.awsCustomDns;
           if (awsCustomDns.toLowerCase() === "null") awsCustomDns = "";
 
           if (!awsAccessKey || !awsSecretKey || !awsRegion) {

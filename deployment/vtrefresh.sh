@@ -113,6 +113,7 @@ rm -f "$VT_DIR/deployment_config.json"
 rm -f "$VT_DIR/system_console.log"
 rm -f "$VT_DIR/boot_instance.id"
 rm -f "$VT_DIR/duo_sso_config.json"
+rm -f "$VT_DIR/instance_settings.json"
 rm -f "$VT_DIR/local_auth_config.json"
 
 if [ ! -f "$HOME/.env" ]; then

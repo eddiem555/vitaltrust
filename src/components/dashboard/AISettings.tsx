@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { User } from '../../types';
 import { api } from '../../services/api';
+import { applyInstanceSettingsToClientStorage } from '../../instance-settings-sync';
 import { applyDefaultClientSettings } from '../../client-boot-sync';
 
 const AI_DEFENSE_INSPECT_SERVERS = [
@@ -185,6 +186,16 @@ const NodeCard = ({ name, roleKey, activeRole, ip, status, url, isMono }: any) =
 
 export default function AISettings({ user }: { user: User }) {
   const canConfigureSettings = user.role === 'admin';
+
+  const persistInstanceSettings = async (partial: Record<string, unknown>) => {
+    if (!canConfigureSettings) return;
+    try {
+      await api.saveInstanceSettings({ ...partial, requesterRole: user.role });
+    } catch (err) {
+      console.error('Failed to persist instance settings:', err);
+    }
+  };
+
   const [activeSubTab, setActiveSubTab] = useState<'model' | 'deployment' | 'security'>('deployment');
 
   // AI Model Tab States
@@ -287,8 +298,9 @@ export default function AISettings({ user }: { user: User }) {
     activeProvider: 'local'
   });
 
-  // Load initially from LocalStorage & API endpoints
+  // Load initially from server instance settings, LocalStorage & API endpoints
   useEffect(() => {
+    const hydrateFromClientStorage = () => {
     // Model credentials
     const storedAssistantModel = localStorage.getItem('vt_ai_selected_model') || 'OpenAI GPT-5';
     const migratedAssistant = storedAssistantModel.toLowerCase().includes('bedrock')
@@ -365,6 +377,15 @@ export default function AISettings({ user }: { user: User }) {
         console.error("Error loading rules from local storage:", e);
       }
     }
+    };
+
+    fetch('/api/settings/instance')
+      .then((res) => res.json())
+      .then((data) => {
+        applyInstanceSettingsToClientStorage(data);
+        hydrateFromClientStorage();
+      })
+      .catch(() => hydrateFromClientStorage());
 
     fetch('/api/agents/config')
       .then(res => res.json())
@@ -522,6 +543,19 @@ export default function AISettings({ user }: { user: User }) {
       console.error('Failed to sync model credentials to server:', err);
     }
 
+    await persistInstanceSettings({
+      selectedModel,
+      agentSelectedModel,
+      openaiKey,
+      groqKey,
+      geminiKey,
+      claudeKey,
+      awsRegion,
+      awsAccessKey,
+      awsSecretKey,
+      awsCustomDns,
+    });
+
     window.dispatchEvent(new Event('vt_settings_updated'));
     setModelSaveSuccess(true);
     setTimeout(() => {
@@ -567,12 +601,13 @@ export default function AISettings({ user }: { user: User }) {
   };
 
   // Saves Cisco AI Defense Guardrails directly without mandatory connection check blocking
-  const handleSaveSecuritySettings = (e: React.FormEvent) => {
+  const handleSaveSecuritySettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canConfigureSettings) return;
 
+    let normalizedProxy = aiDefenseProxyUrl;
     if (aiDefenseMode === 'Defense Gateway') {
-      const normalizedProxy = normalizeDefenseProxyUrl(aiDefenseProxyUrl);
+      normalizedProxy = normalizeDefenseProxyUrl(aiDefenseProxyUrl);
       if (!normalizedProxy) {
         setDefenseTestStatus('error');
         setDefenseTestMessage('Defense Gateway URL is required when using Defense Gateway mode.');
@@ -599,6 +634,17 @@ export default function AISettings({ user }: { user: User }) {
     localStorage.setItem('vt_ai_defense_api_key', aiDefenseApiKey);
     localStorage.setItem('vt_ai_defense_prompt_source', aiDefensePromptSource);
     localStorage.setItem('vt_ai_defense_rules', JSON.stringify(aiDefenseRules));
+
+    await persistInstanceSettings({
+      aiDefenseEnabled,
+      aiDefenseMode,
+      aiDefenseServer,
+      aiDefenseProxyUrl: aiDefenseMode === 'Defense Gateway' ? normalizedProxy : '',
+      aiDefenseGateway: aiDefenseMode === 'Defense Gateway' ? normalizedProxy : aiDefenseServer,
+      aiDefenseApiKey,
+      aiDefensePromptSource,
+      aiDefenseRules,
+    });
     
     window.dispatchEvent(new Event('vt_settings_updated'));
     
@@ -1965,6 +2011,7 @@ export default function AISettings({ user }: { user: User }) {
                         const nextVal = !aiDefenseEnabled;
                         setAiDefenseEnabled(nextVal);
                         localStorage.setItem('vt_ai_defense_enabled', String(nextVal));
+                        void persistInstanceSettings({ aiDefenseEnabled: nextVal });
                         window.dispatchEvent(new Event('vt_settings_updated'));
                       }}
                       className={`w-11 h-6 flex items-center rounded-full p-1 transition-all duration-300 focus:outline-none ${

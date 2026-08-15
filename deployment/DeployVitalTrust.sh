@@ -36,7 +36,7 @@ reset_db_artifact() {
   fi
 }
 
-for artifact in "persistent_db.json" "deployment_config.json" "system_console.log" "boot_instance.id" "duo_sso_config.json" "local_auth_config.json"; do
+for artifact in "persistent_db.json" "deployment_config.json" "system_console.log" "boot_instance.id" "duo_sso_config.json" "instance_settings.json" "local_auth_config.json"; do
   reset_db_artifact "$(pwd)/$artifact"
 done
 
@@ -92,7 +92,7 @@ vt_install_student_scripts() {
     echo "[WARN] sudo not available — install vt-start/vt-stop/vt-status to /usr/local/bin manually."
     return 0
   fi
-  for script in vt-start vt-stop vt-status; do
+  for script in vt-start vt-stop vt-status vt-upgrade-all; do
     src="$SCRIPT_DIR/$script"
     dest="/usr/local/bin/$script"
     if [ ! -f "$src" ]; then
