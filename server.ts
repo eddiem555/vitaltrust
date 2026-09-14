@@ -48,6 +48,12 @@ import {
 import { executeBedrockChat } from "./server-bedrock";
 import { executeClaudeChat } from "./server-claude";
 import {
+  getModelFamily as getLlmModelFamily,
+  resolveGeminiModelId,
+  resolveGroqModelId,
+  resolveOpenAiModelId,
+} from "./src/llm-models";
+import {
   applyAgentConfigUpdate,
   getAgentConfig,
   initAgentScheduler,
@@ -2520,6 +2526,7 @@ async function startServer() {
     app.get("/api/ai/config", (req, res) => {
       const geminiAvailable = !!process.env.GEMINI_API_KEY;
       const openaiAvailable = !!process.env.OPENAI_API_KEY;
+      const groqAvailable = !!process.env.GROQ_API_KEY;
       const claudeAvailable = !!process.env.CLAUDE_API_KEY;
       const awsRegionAvailable = !!process.env.AWS_REGION;
       const awsAccessKeyAvailable = !!process.env.AWS_ACCESS_KEY;
@@ -2536,6 +2543,7 @@ async function startServer() {
       res.json({
         geminiAvailable,
         openaiAvailable,
+        groqAvailable,
         claudeAvailable,
         awsBedrockAvailable,
         awsRegion: awsRegionAvailable ? process.env.AWS_REGION : undefined,
@@ -2895,8 +2903,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
         );
       }
 
-      const targetModelName = selectedModel || resolvedDefense.selectedModel || "OpenAI GPT-5";
-      const cleanedModel = targetModelName.toLowerCase();
+      const targetModelName = selectedModel || resolvedDefense.selectedModel || "OpenAI - GPT-4o mini";
       const uId = userId || "unknown_patient";
       const uName = userName || "Unknown Patient";
       const uRole = userRole || "patient";
@@ -3029,26 +3036,6 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
 
       const activeTools: string[] = ROLE_TOOLS[uRole] || [];
 
-      const resolveGeminiModelId = (modelName: string): string => {
-        const m = modelName.toLowerCase().trim();
-        const match = m.match(/gemini-[\d.]+-flash/);
-        if (match) return match[0];
-        return "gemini-2.5-flash";
-      };
-
-      const resolveGroqModelId = (modelName: string): string => {
-        const key = modelName.toLowerCase().trim();
-        const groqApiIds: Record<string, string> = {
-          "groq-llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
-          "groq-llama-4-maverick-17b-128e-instruct": "llama-4-maverick-17b-128e-instruct",
-          "groq-qwen3-32b": "qwen/qwen3-32b",
-          "groq-kimi-k2-instruct-0905": "moonshotai/kimi-k2-instruct-0905",
-        };
-        if (groqApiIds[key]) return groqApiIds[key];
-        if (key.startsWith("groq-")) return key.slice(5);
-        return "llama-3.3-70b-versatile";
-      };
-
       const executeGeminiCall = async (
         geminiKey: string,
         systemPrompt: string,
@@ -3127,19 +3114,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
       };
 
       // 2. --- Determine LLM Provider Family ---
-      let targetModelFamily: 'openai' | 'groq' | 'gemini' | 'claude' | 'bedrock' = 'openai';
-
-      if (cleanedModel.includes('openai') || cleanedModel.startsWith('o3')) {
-        targetModelFamily = 'openai';
-      } else if (cleanedModel.includes('llama') || cleanedModel.includes('qwen') || cleanedModel.includes('kimi')) {
-        targetModelFamily = 'groq';
-      } else if (cleanedModel.includes('gemini')) {
-        targetModelFamily = 'gemini';
-      } else if (cleanedModel.startsWith('claude -') || (cleanedModel.includes('claude-') && !cleanedModel.includes('bedrock'))) {
-        targetModelFamily = 'claude';
-      } else if (cleanedModel.includes('bedrock')) {
-        targetModelFamily = 'bedrock';
-      }
+      const targetModelFamily = getLlmModelFamily(targetModelName);
       
       console.log(`[AI_BROKER] [PROVIDER_SELECT] Inferred model family: "${targetModelFamily}" for requested model: "${targetModelName}". Starting provider-specific execution route.`);
 
@@ -3150,21 +3125,9 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             throw new Error("OpenAI API Key is missing. Please enter it in the settings panel.");
           }
 
-          let openaiModelId = "gpt-4o-mini"; // fallback
-          if (cleanedModel.includes("gpt-5-mini") || cleanedModel.includes("gpt-5-nano")) {
-            openaiModelId = "gpt-4o-mini";
-          } else if (cleanedModel.includes("gpt-5")) {
-            openaiModelId = "gpt-4o";
-          } else if (cleanedModel.includes("gpt-4.1") || cleanedModel.includes("gpt-4o")) {
-            openaiModelId = "gpt-4o";
-          } else if (cleanedModel.includes("gpt-4")) {
-            openaiModelId = "gpt-4";
-          } else if (cleanedModel.includes("o3-mini")) {
-            openaiModelId = "o3-mini";
-          }
-
-          const isO3Mini = openaiModelId === "o3-mini";
-          const messages: any[] = [{ role: isO3Mini ? "developer" : "system", content: systemPrompt }];
+          const openaiModelId = resolveOpenAiModelId(targetModelName);
+          const isReasoningModel = openaiModelId === "o3-mini" || openaiModelId === "o4-mini";
+          const messages: any[] = [{ role: isReasoningModel ? "developer" : "system", content: systemPrompt }];
           if (Array.isArray(history)) {
             history.forEach((h: any) => {
               messages.push({
@@ -3198,7 +3161,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             if (formattedTools.length > 0) {
               requestBody.tools = formattedTools;
             }
-            if (!isO3Mini) {
+            if (!isReasoningModel) {
               requestBody.temperature = 0.7;
             }
 

@@ -26,7 +26,7 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   chartUpdaterIntervalMin: 60,
   overnightNurseIntervalMin: 20,
   nightShiftOnly: true,
-  agentModel: "Bedrock - anthropic.claude-haiku-4-5-20251001-v1:0",
+  agentModel: "Bedrock - Claude Haiku 4.5",
 };
 
 export interface AgentVitalsSnapshot {

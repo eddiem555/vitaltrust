@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Save, 
@@ -72,42 +72,19 @@ function isValidDefenseGatewayUrl(url: string): boolean {
   // CogniSphere pattern: …/<tenant>/connections/<connection-id>
   return /\/connections\/[a-f0-9-]+/i.test(normalized);
 }
-import { BEDROCK_UI_MODELS, migrateEolBedrockModelId, stripBedrockUiPrefix } from '../../bedrock-models';
-import { CLAUDE_UI_MODELS, migrateEolClaudeModelId, stripClaudeUiPrefix } from '../../claude-models';
+import { migrateEolBedrockModelId, stripBedrockUiPrefix } from '../../bedrock-models';
+import {
+  buildAgentModelLabels,
+  buildAssistantModelLabels,
+  DEFAULT_AGENT_MODEL_LABEL,
+  DEFAULT_ASSISTANT_MODEL_LABEL,
+  getModelFamily,
+  migrateAssistantModelLabel,
+  ProviderKeyAvailability,
+} from '../../llm-models';
 
-const OPENAI_MODELS = [
-  "OpenAI GPT-5",
-  "OpenAI GPT-5-mini",
-  "OpenAI GPT-5-nano",
-  "OpenAI GPT-4.1",
-  "OpenAI o3-mini",
-  "OpenAI GPT-4o",
-  "OpenAI GPT-4",
-];
-
-const GROQ_MODELS = [
-  "groq-llama-3.3-70b-versatile",
-  "groq-llama-4-maverick-17b-128e-instruct",
-  "groq-qwen3-32b",
-  "groq-kimi-k2-instruct-0905",
-];
-
-const GEMINI_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-];
-
-/** All models available to the interactive AI Assistant chatbot. */
-const ASSISTANT_MODELS = [
-  ...OPENAI_MODELS,
-  ...GROQ_MODELS,
-  ...GEMINI_MODELS,
-  ...CLAUDE_UI_MODELS,
-  ...BEDROCK_UI_MODELS,
-];
-
-/** Autonomous background agents — Bedrock-hosted models only. */
-const AGENT_MODELS = [...BEDROCK_UI_MODELS];
+const ENV_KEY_PLACEHOLDER = "Currently using key from .env file";
+const ENV_SECRET_PLACEHOLDER = "Currently using secret from .env file";
 
 const REGIONS = [
   "us-east-1",
@@ -116,16 +93,6 @@ const REGIONS = [
   "eu-west-1",
   "ap-southeast-1"
 ];
-
-function getModelFamily(model: string): 'openai' | 'groq' | 'gemini' | 'claude' | 'bedrock' {
-  const m = model.toLowerCase();
-  if (m.startsWith('claude -')) return 'claude';
-  if (m.includes('openai') || m.startsWith('o3')) return 'openai';
-  if (m.includes('llama') || m.includes('qwen') || m.includes('kimi') || m.startsWith('groq-')) return 'groq';
-  if (m.includes('gemini')) return 'gemini';
-  if (m.includes('bedrock')) return 'bedrock';
-  return 'openai';
-}
 
 function sanitizeIntervalDigits(raw: string): string {
   return raw.replace(/\D/g, '').slice(0, 3);
@@ -199,8 +166,8 @@ export default function AISettings({ user }: { user: User }) {
   const [activeSubTab, setActiveSubTab] = useState<'model' | 'deployment' | 'security'>('deployment');
 
   // AI Model Tab States
-  const [selectedModel, setSelectedModel] = useState<string>('OpenAI GPT-5');
-  const [agentSelectedModel, setAgentSelectedModel] = useState<string>('Bedrock - anthropic.claude-haiku-4-5-20251001-v1:0');
+  const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_ASSISTANT_MODEL_LABEL);
+  const [agentSelectedModel, setAgentSelectedModel] = useState<string>(DEFAULT_AGENT_MODEL_LABEL);
   const [openaiKey, setOpenaiKey] = useState<string>('');
   const [groqKey, setGroqKey] = useState<string>('');
   const [geminiKey, setGeminiKey] = useState<string>('');
@@ -286,6 +253,7 @@ export default function AISettings({ user }: { user: User }) {
   const [serverKeysConfig, setServerKeysConfig] = useState<{
     geminiAvailable: boolean;
     openaiAvailable: boolean;
+    groqAvailable: boolean;
     claudeAvailable: boolean;
     awsBedrockAvailable: boolean;
     awsRegion?: string;
@@ -293,6 +261,7 @@ export default function AISettings({ user }: { user: User }) {
   }>({
     geminiAvailable: false,
     openaiAvailable: false,
+    groqAvailable: false,
     claudeAvailable: false,
     awsBedrockAvailable: false,
     activeProvider: 'local'
@@ -302,30 +271,22 @@ export default function AISettings({ user }: { user: User }) {
   useEffect(() => {
     const hydrateFromClientStorage = () => {
     // Model credentials
-    const storedAssistantModel = localStorage.getItem('vt_ai_selected_model') || 'OpenAI GPT-5';
-    const migratedAssistant = storedAssistantModel.toLowerCase().includes('bedrock')
-      ? `Bedrock - ${migrateEolBedrockModelId(stripBedrockUiPrefix(storedAssistantModel))}`
-      : storedAssistantModel.toLowerCase().startsWith('claude -')
-      ? `Claude - ${migrateEolClaudeModelId(stripClaudeUiPrefix(storedAssistantModel))}`
-      : storedAssistantModel;
-    if (ASSISTANT_MODELS.includes(migratedAssistant)) {
-      setSelectedModel(migratedAssistant);
-      if (migratedAssistant !== storedAssistantModel) {
-        localStorage.setItem('vt_ai_selected_model', migratedAssistant);
-      }
-    } else {
-      setSelectedModel('Bedrock - anthropic.claude-sonnet-4-5-20250929-v1:0');
+    const storedAssistantModel = localStorage.getItem('vt_ai_selected_model') || DEFAULT_ASSISTANT_MODEL_LABEL;
+    const migratedAssistant = migrateAssistantModelLabel(storedAssistantModel);
+    setSelectedModel(migratedAssistant);
+    if (migratedAssistant !== storedAssistantModel) {
+      localStorage.setItem('vt_ai_selected_model', migratedAssistant);
     }
 
-    const storedAgentModel = localStorage.getItem('vt_ai_agent_selected_model') || 'Bedrock - anthropic.claude-haiku-4-5-20251001-v1:0';
-    const migratedAgent = `Bedrock - ${migrateEolBedrockModelId(stripBedrockUiPrefix(storedAgentModel))}`;
-    if (AGENT_MODELS.includes(migratedAgent)) {
-      setAgentSelectedModel(migratedAgent);
-      if (migratedAgent !== storedAgentModel) {
-        localStorage.setItem('vt_ai_agent_selected_model', migratedAgent);
-      }
-    } else {
-      setAgentSelectedModel('Bedrock - anthropic.claude-haiku-4-5-20251001-v1:0');
+    const storedAgentModel = localStorage.getItem('vt_ai_agent_selected_model') || DEFAULT_AGENT_MODEL_LABEL;
+    const migratedAgent = migrateAssistantModelLabel(
+      storedAgentModel.toLowerCase().includes('bedrock')
+        ? storedAgentModel
+        : `Bedrock - ${migrateEolBedrockModelId(stripBedrockUiPrefix(storedAgentModel))}`
+    );
+    setAgentSelectedModel(migratedAgent);
+    if (migratedAgent !== storedAgentModel) {
+      localStorage.setItem('vt_ai_agent_selected_model', migratedAgent);
     }
     setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
     setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
@@ -412,8 +373,8 @@ export default function AISettings({ user }: { user: User }) {
             setAgentOvernightNurseIntervalInput(String(overnightInterval));
           }
           if (typeof data.nightShiftOnly === 'boolean') setAgentNightShiftOnly(data.nightShiftOnly);
-          if (data.agentModel && AGENT_MODELS.includes(data.agentModel)) {
-            setAgentSelectedModel(data.agentModel);
+          if (data.agentModel) {
+            setAgentSelectedModel(migrateAssistantModelLabel(String(data.agentModel)));
           }
         }
       })
@@ -440,6 +401,7 @@ export default function AISettings({ user }: { user: User }) {
           setServerKeysConfig({
             geminiAvailable: !!data.geminiAvailable,
             openaiAvailable: !!data.openaiAvailable,
+            groqAvailable: !!data.groqAvailable,
             claudeAvailable: !!data.claudeAvailable,
             awsBedrockAvailable: !!data.awsBedrockAvailable,
             awsRegion: data.awsRegion,
@@ -1003,6 +965,48 @@ export default function AISettings({ user }: { user: User }) {
     }
   };
 
+  const providerKeyAvailability = useMemo<ProviderKeyAvailability>(() => ({
+    openai: openaiKey.trim().length > 0 || serverKeysConfig.openaiAvailable,
+    groq: groqKey.trim().length > 0 || serverKeysConfig.groqAvailable,
+    gemini: geminiKey.trim().length > 0 || serverKeysConfig.geminiAvailable,
+    claude: claudeKey.trim().length > 0 || serverKeysConfig.claudeAvailable,
+    bedrock:
+      serverKeysConfig.awsBedrockAvailable ||
+      (awsAccessKey.trim().length > 0 && awsSecretKey.trim().length > 0),
+  }), [
+    openaiKey,
+    groqKey,
+    geminiKey,
+    claudeKey,
+    awsAccessKey,
+    awsSecretKey,
+    serverKeysConfig,
+  ]);
+
+  const availableAssistantModels = useMemo(
+    () => buildAssistantModelLabels(providerKeyAvailability),
+    [providerKeyAvailability]
+  );
+
+  const availableAgentModels = useMemo(
+    () => buildAgentModelLabels(providerKeyAvailability),
+    [providerKeyAvailability]
+  );
+
+  useEffect(() => {
+    if (availableAssistantModels.length === 0) return;
+    if (!availableAssistantModels.includes(selectedModel)) {
+      setSelectedModel(availableAssistantModels[0]);
+    }
+  }, [availableAssistantModels, selectedModel]);
+
+  useEffect(() => {
+    if (availableAgentModels.length === 0) return;
+    if (!availableAgentModels.includes(agentSelectedModel)) {
+      setAgentSelectedModel(availableAgentModels[0]);
+    }
+  }, [availableAgentModels, agentSelectedModel]);
+
   const assistantFamily = getModelFamily(selectedModel);
   const agentFamily = getModelFamily(agentSelectedModel);
   const bedrockCredentialsActive =
@@ -1105,7 +1109,90 @@ export default function AISettings({ user }: { user: User }) {
               </div>
 
               <div className="p-8 space-y-6">
-                {/* API Keys Configuration — listed first */}
+                {/* LLM model selection — most frequently changed */}
+                <div className="space-y-4">
+                  <h5 className="text-xs font-black uppercase text-slate-500 tracking-wider flex items-center gap-2">
+                    <BrainCircuit size={14} className="text-[#7c1a1a]" />
+                    LLM Model Selection
+                  </h5>
+
+                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-150 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                    <div>
+                      <label className="text-xs font-black uppercase text-slate-700 tracking-wider">
+                        AI Assistant Model
+                      </label>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Interactive chatbot — only families with API keys configured are listed.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <select
+                          value={selectedModel}
+                          onChange={(e) => setSelectedModel(e.target.value)}
+                          disabled={availableAssistantModels.length === 0}
+                          className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 appearance-none focus:outline-none cursor-pointer pr-10 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {availableAssistantModels.length === 0 ? (
+                            <option value="">No API keys configured</option>
+                          ) : (
+                            availableAssistantModels.map((m) => (
+                              <option key={m} value={m}>{m}</option>
+                            ))
+                          )}
+                        </select>
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                          <ChevronDown size={14} />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
+                        <Sparkles className="text-amber-500" size={12} />
+                        <span>Routing under </span>
+                        <span className="font-extrabold text-[#7c1a1a] uppercase">{assistantFamily}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-150 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                    <div>
+                      <label className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-1.5">
+                        <Bot size={14} className="text-[#7c1a1a]" />
+                        AI Agents Model
+                      </label>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Autonomous background agents — Bedrock-hosted models only.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <select
+                          value={agentSelectedModel}
+                          onChange={(e) => setAgentSelectedModel(e.target.value)}
+                          disabled={availableAgentModels.length === 0}
+                          className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 appearance-none focus:outline-none cursor-pointer pr-10 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {availableAgentModels.length === 0 ? (
+                            <option value="">Configure AWS Bedrock credentials</option>
+                          ) : (
+                            availableAgentModels.map((m) => (
+                              <option key={`agent-${m}`} value={m}>{m}</option>
+                            ))
+                          )}
+                        </select>
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                          <ChevronDown size={14} />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
+                        <Sparkles className="text-amber-500" size={12} />
+                        <span>Agents routing under </span>
+                        <span className="font-extrabold text-[#7c1a1a] uppercase">{agentFamily}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* API Keys Configuration */}
                 <div className="space-y-5">
                   <h5 className="text-xs font-black uppercase text-slate-500 tracking-wider flex items-center gap-2">
                     <Key size={14} className="text-[#7c1a1a]" />
@@ -1128,7 +1215,7 @@ export default function AISettings({ user }: { user: User }) {
                           type={showOpenaiKey ? "text" : "password"}
                           value={openaiKey}
                           onChange={(e) => setOpenaiKey(e.target.value)}
-                          placeholder={serverKeysConfig.openaiAvailable ? "Using key from environment (.env) - enter text to override" : "sk-..."}
+                          placeholder={serverKeysConfig.openaiAvailable ? ENV_KEY_PLACEHOLDER : "sk-..."}
                           className="w-full bg-white border border-slate-200 focus:border-[#7c1a1a] rounded-xl pl-4 pr-10 py-2.5 text-xs text-slate-800 focus:outline-none transition-all font-mono"
                         />
                         <button
@@ -1155,7 +1242,7 @@ export default function AISettings({ user }: { user: User }) {
                           type={showGroqKey ? "text" : "password"}
                           value={groqKey}
                           onChange={(e) => setGroqKey(e.target.value)}
-                          placeholder="gsk-..."
+                          placeholder={serverKeysConfig.groqAvailable ? ENV_KEY_PLACEHOLDER : "gsk-..."}
                           className="w-full bg-white border border-slate-200 focus:border-[#7c1a1a] rounded-xl pl-4 pr-10 py-2.5 text-xs text-slate-800 focus:outline-none transition-all font-mono"
                         />
                         <button
@@ -1184,7 +1271,7 @@ export default function AISettings({ user }: { user: User }) {
                           type={showGeminiKey ? "text" : "password"}
                           value={geminiKey}
                           onChange={(e) => setGeminiKey(e.target.value)}
-                          placeholder={serverKeysConfig.geminiAvailable ? "Using key from environment (.env) - enter text to override" : "AIzaSy..."}
+                          placeholder={serverKeysConfig.geminiAvailable ? ENV_KEY_PLACEHOLDER : "AIzaSy..."}
                           className="w-full bg-white border border-slate-200 focus:border-[#7c1a1a] rounded-xl pl-4 pr-10 py-2.5 text-xs text-slate-800 focus:outline-none transition-all font-mono"
                         />
                         <button
@@ -1213,7 +1300,7 @@ export default function AISettings({ user }: { user: User }) {
                           type={showClaudeKey ? "text" : "password"}
                           value={claudeKey}
                           onChange={(e) => setClaudeKey(e.target.value)}
-                          placeholder={serverKeysConfig.claudeAvailable ? "Using key from environment (.env) - enter text to override" : "sk-ant-..."}
+                          placeholder={serverKeysConfig.claudeAvailable ? ENV_KEY_PLACEHOLDER : "sk-ant-..."}
                           className="w-full bg-white border border-slate-200 focus:border-[#7c1a1a] rounded-xl pl-4 pr-10 py-2.5 text-xs text-slate-800 focus:outline-none transition-all font-mono"
                         />
                         <button
@@ -1290,7 +1377,7 @@ export default function AISettings({ user }: { user: User }) {
                           type={showAwsAccessKey ? "text" : "password"}
                           value={awsAccessKey}
                           onChange={(e) => setAwsAccessKey(e.target.value)}
-                          placeholder={serverKeysConfig.awsBedrockAvailable ? "Using key from environment (.env) - enter text to override" : "AKIA..."}
+                          placeholder={serverKeysConfig.awsBedrockAvailable ? ENV_KEY_PLACEHOLDER : "AKIA..."}
                           className="w-full bg-white border border-slate-200 focus:border-[#7c1a1a] rounded-xl pl-4 pr-10 py-2 text-xs text-slate-800 focus:outline-none font-mono"
                         />
                         <button
@@ -1311,7 +1398,7 @@ export default function AISettings({ user }: { user: User }) {
                           type={showAwsSecretKey ? "text" : "password"}
                           value={awsSecretKey}
                           onChange={(e) => setAwsSecretKey(e.target.value)}
-                          placeholder={serverKeysConfig.awsBedrockAvailable ? "Using secret from environment (.env) - enter text to override" : "Enter AWS Secret Key"}
+                          placeholder={serverKeysConfig.awsBedrockAvailable ? ENV_SECRET_PLACEHOLDER : "Enter AWS Secret Key"}
                           className="w-full bg-white border border-slate-200 focus:border-[#7c1a1a] rounded-xl pl-4 pr-10 py-2 text-xs text-slate-800 focus:outline-none font-mono"
                         />
                         <button
@@ -1321,79 +1408,6 @@ export default function AISettings({ user }: { user: User }) {
                         >
                           {showAwsSecretKey ? <EyeOff size={14} /> : <Eye size={14} />}
                         </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* LLM model selection — after API credentials */}
-                <div className="space-y-4">
-                  <h5 className="text-xs font-black uppercase text-slate-500 tracking-wider flex items-center gap-2">
-                    <BrainCircuit size={14} className="text-[#7c1a1a]" />
-                    LLM Model Selection
-                  </h5>
-
-                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-150 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                    <div>
-                      <label className="text-xs font-black uppercase text-slate-700 tracking-wider">
-                        AI Assistant Model
-                      </label>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        Interactive chatbot — OpenAI, Groq, Gemini, Claude, or Bedrock models.
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="relative">
-                        <select
-                          value={selectedModel}
-                          onChange={(e) => setSelectedModel(e.target.value)}
-                          className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 appearance-none focus:outline-none cursor-pointer pr-10"
-                        >
-                          {ASSISTANT_MODELS.map((m) => (
-                            <option key={m} value={m}>{m}</option>
-                          ))}
-                        </select>
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                          <ChevronDown size={14} />
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
-                        <Sparkles className="text-amber-500" size={12} />
-                        <span>Routing under </span>
-                        <span className="font-extrabold text-[#7c1a1a] uppercase">{assistantFamily}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-150 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                    <div>
-                      <label className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-1.5">
-                        <Bot size={14} className="text-[#7c1a1a]" />
-                        AI Agents Model
-                      </label>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        Autonomous background agents — Bedrock-hosted models only.
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="relative">
-                        <select
-                          value={agentSelectedModel}
-                          onChange={(e) => setAgentSelectedModel(e.target.value)}
-                          className="w-full bg-[#fafafa] border border-slate-200 focus:border-[#7c1a1a] rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 appearance-none focus:outline-none cursor-pointer pr-10"
-                        >
-                          {AGENT_MODELS.map((m) => (
-                            <option key={`agent-${m}`} value={m}>{m}</option>
-                          ))}
-                        </select>
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                          <ChevronDown size={14} />
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
-                        <Sparkles className="text-amber-500" size={12} />
-                        <span>Agents routing under </span>
-                        <span className="font-extrabold text-[#7c1a1a] uppercase">{agentFamily}</span>
                       </div>
                     </div>
                   </div>

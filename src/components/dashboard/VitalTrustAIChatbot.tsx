@@ -1,24 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Send, Bot, Database, Sparkles, User as UserIcon, Lock, Key, Settings, AlertTriangle, RotateCcw } from 'lucide-react';
-import { migrateEolBedrockModelId, stripBedrockUiPrefix } from '../../bedrock-models';
-import { migrateEolClaudeModelId, stripClaudeUiPrefix } from '../../claude-models';
+import {
+  DEFAULT_ASSISTANT_MODEL_LABEL,
+  getModelFamily,
+  migrateAssistantModelLabel,
+} from '../../llm-models';
 import { User } from '../../types';
 import { applyInstanceSettingsToClientStorage } from '../../instance-settings-sync';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
-}
-
-function getModelFamily(model: string): 'openai' | 'groq' | 'gemini' | 'claude' | 'bedrock' {
-  const m = model.toLowerCase();
-  if (m.startsWith('claude -')) return 'claude';
-  if (m.includes('openai') || m.startsWith('o3')) return 'openai';
-  if (m.includes('llama') || m.includes('qwen') || m.includes('kimi')) return 'groq';
-  if (m.includes('gemini')) return 'gemini';
-  if (m.includes('bedrock')) return 'bedrock';
-  return 'openai';
 }
 
 const getInitialMessage = (u: User) => {
@@ -54,7 +47,7 @@ ${examples}
 
 export default function VitalTrustAIChatbot({ user }: { user: User; key?: string }) {
   // Load configuration from localStorage
-  const [selectedModel, setSelectedModel] = useState<string>('OpenAI GPT-5');
+  const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_ASSISTANT_MODEL_LABEL);
   const [openaiKey, setOpenaiKey] = useState<string>('');
   const [groqKey, setGroqKey] = useState<string>('');
   const [geminiKey, setGeminiKey] = useState<string>('');
@@ -69,12 +62,16 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   const [serverKeysConfig, setServerKeysConfig] = useState<{
     geminiAvailable: boolean;
     openaiAvailable: boolean;
+    groqAvailable: boolean;
     claudeAvailable: boolean;
+    awsBedrockAvailable: boolean;
     activeProvider: string;
   }>({
     geminiAvailable: false,
     openaiAvailable: false,
+    groqAvailable: false,
     claudeAvailable: false,
+    awsBedrockAvailable: false,
     activeProvider: 'local'
   });
 
@@ -86,21 +83,11 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   // Load initially on mount (instance settings synced at App boot; refresh here too)
   useEffect(() => {
     const hydrateFromLocalStorage = () => {
-      const storedModel = localStorage.getItem('vt_ai_selected_model') || 'OpenAI GPT-5';
-      if (storedModel.toLowerCase().includes('bedrock')) {
-        const migrated = `Bedrock - ${migrateEolBedrockModelId(stripBedrockUiPrefix(storedModel))}`;
-        setSelectedModel(migrated);
-        if (migrated !== storedModel) {
-          localStorage.setItem('vt_ai_selected_model', migrated);
-        }
-      } else if (storedModel.toLowerCase().startsWith('claude -')) {
-        const migrated = `Claude - ${migrateEolClaudeModelId(stripClaudeUiPrefix(storedModel))}`;
-        setSelectedModel(migrated);
-        if (migrated !== storedModel) {
-          localStorage.setItem('vt_ai_selected_model', migrated);
-        }
-      } else {
-        setSelectedModel(storedModel);
+      const storedModel = localStorage.getItem('vt_ai_selected_model') || DEFAULT_ASSISTANT_MODEL_LABEL;
+      const migrated = migrateAssistantModelLabel(storedModel);
+      setSelectedModel(migrated);
+      if (migrated !== storedModel) {
+        localStorage.setItem('vt_ai_selected_model', migrated);
       }
       setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
       setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
@@ -128,7 +115,9 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
           setServerKeysConfig({
             geminiAvailable: !!data.geminiAvailable,
             openaiAvailable: !!data.openaiAvailable,
+            groqAvailable: !!data.groqAvailable,
             claudeAvailable: !!data.claudeAvailable,
+            awsBedrockAvailable: !!data.awsBedrockAvailable,
             activeProvider: data.activeProvider || 'local'
           });
         }
@@ -213,13 +202,15 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   if (activeFamily === 'openai') {
     isConfigured = openaiKey.trim().length > 0 || serverKeysConfig.openaiAvailable;
   } else if (activeFamily === 'groq') {
-    isConfigured = groqKey.trim().length > 0;
+    isConfigured = groqKey.trim().length > 0 || serverKeysConfig.groqAvailable;
   } else if (activeFamily === 'gemini') {
     isConfigured = geminiKey.trim().length > 0 || serverKeysConfig.geminiAvailable;
   } else if (activeFamily === 'claude') {
     isConfigured = claudeKey.trim().length > 0 || serverKeysConfig.claudeAvailable;
   } else if (activeFamily === 'bedrock') {
-    isConfigured = awsAccessKey.trim().length > 0 && awsSecretKey.trim().length > 0 && awsRegion.trim().length > 0;
+    isConfigured =
+      serverKeysConfig.awsBedrockAvailable ||
+      (awsAccessKey.trim().length > 0 && awsSecretKey.trim().length > 0 && awsRegion.trim().length > 0);
   }
 
   const sendPrompt = async (userMsg: string) => {

@@ -1,41 +1,49 @@
 /** Bedrock model catalog and ID resolution (shared by UI + server). */
 
-export const BEDROCK_MODEL_IDS = [
-  "anthropic.claude-sonnet-4-5-20250929-v1:0",
-  "anthropic.claude-haiku-4-5-20251001-v1:0",
-  "anthropic.claude-sonnet-4-20250514-v1:0",
-  "anthropic.claude-3-5-haiku-20241022-v1:0",
-  "anthropic.claude-opus-4-1-20250805-v1:0",
-  "amazon.nova-pro-v1:0",
-  "amazon.nova-lite-v1:0",
-  "meta.llama3-3-70b-instruct-v1:0",
-] as const;
+export type BedrockModelOption = {
+  label: string;
+  apiId: string;
+};
 
-export const BEDROCK_UI_MODELS = BEDROCK_MODEL_IDS.map(
-  (id) => `Bedrock - ${id}`
-);
+/** Five Bedrock models — lighter tiers first for AI Defense demos. */
+export const BEDROCK_MODEL_OPTIONS: BedrockModelOption[] = [
+  { label: "Bedrock - Claude Haiku 4.5", apiId: "anthropic.claude-haiku-4-5-20251001-v1:0" },
+  { label: "Bedrock - Claude 3.5 Haiku", apiId: "anthropic.claude-3-5-haiku-20241022-v1:0" },
+  { label: "Bedrock - Amazon Nova Lite", apiId: "amazon.nova-lite-v1:0" },
+  { label: "Bedrock - Claude Sonnet 4.5", apiId: "anthropic.claude-sonnet-4-5-20250929-v1:0" },
+  { label: "Bedrock - Amazon Nova Pro", apiId: "amazon.nova-pro-v1:0" },
+];
+
+export const BEDROCK_MODEL_IDS = BEDROCK_MODEL_OPTIONS.map((m) => m.apiId);
+
+export const BEDROCK_UI_MODELS = BEDROCK_MODEL_OPTIONS.map((m) => m.label);
+
+const LABEL_TO_API = new Map(BEDROCK_MODEL_OPTIONS.map((m) => [m.label.toLowerCase(), m.apiId]));
 
 /** Models that reached end-of-life on Bedrock — remap to current equivalents. */
 const EOL_MODEL_REMAP: Record<string, string> = {
   "anthropic.claude-3-5-sonnet-20240620-v1:0": "anthropic.claude-sonnet-4-5-20250929-v1:0",
   "anthropic.claude-3-5-sonnet-20241022-v2:0": "anthropic.claude-sonnet-4-5-20250929-v1:0",
   "anthropic.claude-3-7-sonnet-20250219-v1:0": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+  "anthropic.claude-sonnet-4-20250514-v1:0": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+  "anthropic.claude-opus-4-1-20250805-v1:0": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+  "meta.llama3-3-70b-instruct-v1:0": "amazon.nova-lite-v1:0",
 };
 
 /** Models that support cross-region (CRIS) inference profile prefixes. */
 const INFERENCE_PROFILE_MODELS = new Set([
   "anthropic.claude-haiku-4-5-20251001-v1:0",
   "anthropic.claude-sonnet-4-5-20250929-v1:0",
-  "anthropic.claude-opus-4-1-20250805-v1:0",
-  "anthropic.claude-sonnet-4-20250514-v1:0",
   "anthropic.claude-3-5-haiku-20241022-v1:0",
-  "amazon.nova-premier-v1:0",
-  "meta.llama4-maverick-17b-instruct-v1:0",
-  "meta.llama3-3-70b-instruct-v1:0",
+  "amazon.nova-pro-v1:0",
+  "amazon.nova-lite-v1:0",
 ]);
 
 export function stripBedrockUiPrefix(modelName: string): string {
-  return modelName.replace(/^bedrock\s*-\s*/i, "").trim();
+  const trimmed = modelName.trim();
+  const fromLabel = LABEL_TO_API.get(trimmed.toLowerCase());
+  if (fromLabel) return fromLabel;
+  return trimmed.replace(/^bedrock\s*-\s*/i, "").trim();
 }
 
 export function migrateEolBedrockModelId(modelId: string): string {
