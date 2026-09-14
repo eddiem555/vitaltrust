@@ -50,8 +50,8 @@ import { executeClaudeChat } from "./server-claude";
 import {
   getModelFamily as getLlmModelFamily,
   resolveGeminiModelId,
-  resolveGroqModelId,
   resolveOpenAiModelId,
+  resolveTogetherModelId,
 } from "./src/llm-models";
 import {
   applyAgentConfigUpdate,
@@ -2526,7 +2526,7 @@ async function startServer() {
     app.get("/api/ai/config", (req, res) => {
       const geminiAvailable = !!process.env.GEMINI_API_KEY;
       const openaiAvailable = !!process.env.OPENAI_API_KEY;
-      const groqAvailable = !!process.env.GROQ_API_KEY;
+      const togetherAvailable = !!(process.env.TOGETHER_API_KEY || process.env.GROQ_API_KEY);
       const claudeAvailable = !!process.env.CLAUDE_API_KEY;
       const awsRegionAvailable = !!process.env.AWS_REGION;
       const awsAccessKeyAvailable = !!process.env.AWS_ACCESS_KEY;
@@ -2543,7 +2543,7 @@ async function startServer() {
       res.json({
         geminiAvailable,
         openaiAvailable,
-        groqAvailable,
+        togetherAvailable,
         claudeAvailable,
         awsBedrockAvailable,
         awsRegion: awsRegionAvailable ? process.env.AWS_REGION : undefined,
@@ -3055,7 +3055,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
         const useProxy = proxyLlmViaDefenseGateway;
         if (useProxy) {
           throw new Error(
-            "Google Gemini is not supported through Cisco AI Defense Gateway. Use Via API inspect mode or switch to AWS Bedrock, OpenAI, or Groq with Defense Gateway."
+            "Google Gemini is not supported through Cisco AI Defense Gateway. Use Via API inspect mode or switch to AWS Bedrock, OpenAI, or Together AI with Defense Gateway."
           );
         }
 
@@ -3257,13 +3257,13 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             provider: "openai"
           });
 
-        } else if (targetModelFamily === 'groq') {
-          const groqKey = resolvedApiKeys.groqKey;
-          if (!groqKey) {
-            throw new Error("Groq API Key is missing. Please enter it in the settings panel.");
+        } else if (targetModelFamily === 'together') {
+          const togetherKey = resolvedApiKeys.togetherKey;
+          if (!togetherKey) {
+            throw new Error("Together AI API Key is missing. Please enter it in the settings panel.");
           }
 
-          const groqModelId = resolveGroqModelId(targetModelName);
+          const togetherModelId = resolveTogetherModelId(targetModelName);
 
           const messages: any[] = [{ role: "system", content: systemPrompt }];
           if (Array.isArray(history)) {
@@ -3293,7 +3293,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
 
           while (loopLimit > 0) {
             const requestBody: any = {
-              model: groqModelId,
+              model: togetherModelId,
               messages,
               temperature: 0.7
             };
@@ -3301,32 +3301,32 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
               requestBody.tools = formattedTools;
             }
 
-             let groqTargetUrl = "https://api.groq.com/openai/v1/chat/completions";
+             let togetherTargetUrl = "https://api.together.ai/v1/chat/completions";
             if (proxyLlmViaDefenseGateway) {
-              groqTargetUrl = buildDefenseGatewayChatCompletionsUrl(defenseGatewayUrl);
+              togetherTargetUrl = buildDefenseGatewayChatCompletionsUrl(defenseGatewayUrl);
             }
 
-            const groqHeaders: Record<string, string> = {
+            const togetherHeaders: Record<string, string> = {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${groqKey}`,
+              Authorization: `Bearer ${togetherKey}`,
             };
             if (proxyLlmViaDefenseGateway) {
-              groqHeaders["Accept-Encoding"] = "";
+              togetherHeaders["Accept-Encoding"] = "";
             }
 
-            const groqRes = await fetch(groqTargetUrl, {
+            const togetherRes = await fetch(togetherTargetUrl, {
               method: "POST",
-              headers: groqHeaders,
+              headers: togetherHeaders,
               body: JSON.stringify(requestBody),
               signal: AbortSignal.timeout(30000)
             });
 
-            if (!groqRes.ok) {
-              const errBody = await groqRes.text();
-              throw new Error(`Groq HTTP ${groqRes.status}: ${errBody}`);
+            if (!togetherRes.ok) {
+              const errBody = await togetherRes.text();
+              throw new Error(`Together AI HTTP ${togetherRes.status}: ${errBody}`);
             }
 
-            const data: any = await groqRes.json();
+            const data: any = await togetherRes.json();
             const choice = data.choices?.[0];
             replyMessage = choice?.message;
 
@@ -3354,7 +3354,7 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             }
           }
 
-          const reply = replyMessage?.content || "No reply from Groq.";
+          const reply = replyMessage?.content || "No reply from Together AI.";
           const gatewayBlock = proxyLlmViaDefenseGateway ? parseDefenseGatewayPolicyBlock(reply) : null;
           if (gatewayBlock) {
             createLog(
@@ -3379,14 +3379,14 @@ Be helpful, clear, and use markdown bullet lists when presenting structured data
             uRole,
             "AI Assistant Conversation",
             "Success",
-            `[Groq - ${groqModelId}] Patient asked: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`,
+            `[Together - ${togetherModelId}] Patient asked: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`,
             req
           );
 
           return res.json({
             response: reply,
             status: "Safe",
-            provider: "groq"
+            provider: "together"
           });
 
         } else if (targetModelFamily === 'gemini') {

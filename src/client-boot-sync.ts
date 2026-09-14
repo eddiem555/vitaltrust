@@ -36,7 +36,7 @@ export function applyDefaultClientSettings(): void {
   localStorage.setItem('vt_ai_selected_model', 'OpenAI - GPT-4o mini');
   localStorage.setItem('vt_ai_agent_selected_model', 'Bedrock - Claude Haiku 4.5');
   localStorage.setItem('vt_ai_openai_key', '');
-  localStorage.setItem('vt_ai_groq_key', '');
+  localStorage.setItem('vt_ai_together_key', '');
   localStorage.setItem('vt_ai_gemini_key', '');
   localStorage.setItem('vt_ai_claude_key', '');
   localStorage.setItem('vt_ai_aws_region', 'us-east-1');

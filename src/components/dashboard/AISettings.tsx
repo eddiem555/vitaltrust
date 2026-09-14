@@ -81,6 +81,7 @@ import {
   getModelFamily,
   migrateAssistantModelLabel,
   ProviderKeyAvailability,
+  readTogetherKeyFromClientStorage,
 } from '../../llm-models';
 
 const ENV_KEY_PLACEHOLDER = "Currently using key from .env file";
@@ -169,7 +170,7 @@ export default function AISettings({ user }: { user: User }) {
   const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_ASSISTANT_MODEL_LABEL);
   const [agentSelectedModel, setAgentSelectedModel] = useState<string>(DEFAULT_AGENT_MODEL_LABEL);
   const [openaiKey, setOpenaiKey] = useState<string>('');
-  const [groqKey, setGroqKey] = useState<string>('');
+  const [togetherKey, setTogetherKey] = useState<string>('');
   const [geminiKey, setGeminiKey] = useState<string>('');
   const [claudeKey, setClaudeKey] = useState<string>('');
   const [awsRegion, setAwsRegion] = useState<string>('us-east-1');
@@ -186,7 +187,7 @@ export default function AISettings({ user }: { user: User }) {
 
   // Key visibility toggles
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
-  const [showGroqKey, setShowGroqKey] = useState(false);
+  const [showTogetherKey, setShowTogetherKey] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showClaudeKey, setShowClaudeKey] = useState(false);
   const [showAwsAccessKey, setShowAwsAccessKey] = useState(false);
@@ -253,7 +254,7 @@ export default function AISettings({ user }: { user: User }) {
   const [serverKeysConfig, setServerKeysConfig] = useState<{
     geminiAvailable: boolean;
     openaiAvailable: boolean;
-    groqAvailable: boolean;
+    togetherAvailable: boolean;
     claudeAvailable: boolean;
     awsBedrockAvailable: boolean;
     awsRegion?: string;
@@ -261,7 +262,7 @@ export default function AISettings({ user }: { user: User }) {
   }>({
     geminiAvailable: false,
     openaiAvailable: false,
-    groqAvailable: false,
+    togetherAvailable: false,
     claudeAvailable: false,
     awsBedrockAvailable: false,
     activeProvider: 'local'
@@ -289,7 +290,7 @@ export default function AISettings({ user }: { user: User }) {
       localStorage.setItem('vt_ai_agent_selected_model', migratedAgent);
     }
     setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
-    setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
+    setTogetherKey(readTogetherKeyFromClientStorage());
     setGeminiKey(localStorage.getItem('vt_ai_gemini_key') || '');
     setClaudeKey(localStorage.getItem('vt_ai_claude_key') || '');
     setAwsRegion(localStorage.getItem('vt_ai_aws_region') || 'us-east-1');
@@ -401,7 +402,7 @@ export default function AISettings({ user }: { user: User }) {
           setServerKeysConfig({
             geminiAvailable: !!data.geminiAvailable,
             openaiAvailable: !!data.openaiAvailable,
-            groqAvailable: !!data.groqAvailable,
+            togetherAvailable: !!data.togetherAvailable,
             claudeAvailable: !!data.claudeAvailable,
             awsBedrockAvailable: !!data.awsBedrockAvailable,
             awsRegion: data.awsRegion,
@@ -481,7 +482,7 @@ export default function AISettings({ user }: { user: User }) {
     localStorage.setItem('vt_ai_selected_model', selectedModel);
     localStorage.setItem('vt_ai_agent_selected_model', agentSelectedModel);
     localStorage.setItem('vt_ai_openai_key', openaiKey);
-    localStorage.setItem('vt_ai_groq_key', groqKey);
+    localStorage.setItem('vt_ai_together_key', togetherKey);
     localStorage.setItem('vt_ai_gemini_key', geminiKey);
     localStorage.setItem('vt_ai_claude_key', claudeKey);
     localStorage.setItem('vt_ai_aws_region', awsRegion);
@@ -509,7 +510,7 @@ export default function AISettings({ user }: { user: User }) {
       selectedModel,
       agentSelectedModel,
       openaiKey,
-      groqKey,
+      togetherKey,
       geminiKey,
       claudeKey,
       awsRegion,
@@ -967,7 +968,7 @@ export default function AISettings({ user }: { user: User }) {
 
   const providerKeyAvailability = useMemo<ProviderKeyAvailability>(() => ({
     openai: openaiKey.trim().length > 0 || serverKeysConfig.openaiAvailable,
-    groq: groqKey.trim().length > 0 || serverKeysConfig.groqAvailable,
+    together: togetherKey.trim().length > 0 || serverKeysConfig.togetherAvailable,
     gemini: geminiKey.trim().length > 0 || serverKeysConfig.geminiAvailable,
     claude: claudeKey.trim().length > 0 || serverKeysConfig.claudeAvailable,
     bedrock:
@@ -975,7 +976,7 @@ export default function AISettings({ user }: { user: User }) {
       (awsAccessKey.trim().length > 0 && awsSecretKey.trim().length > 0),
   }), [
     openaiKey,
-    groqKey,
+    togetherKey,
     geminiKey,
     claudeKey,
     awsAccessKey,
@@ -1011,7 +1012,7 @@ export default function AISettings({ user }: { user: User }) {
   const agentFamily = getModelFamily(agentSelectedModel);
   const bedrockCredentialsActive =
     assistantFamily === 'bedrock' || agentFamily === 'bedrock' || agentChartUpdaterEnabled || agentOvernightNurseEnabled;
-  const usesProvider = (family: 'openai' | 'groq' | 'gemini' | 'claude' | 'bedrock') =>
+  const usesProvider = (family: 'openai' | 'together' | 'gemini' | 'claude' | 'bedrock') =>
     assistantFamily === family || agentFamily === family;
 
   return (
@@ -1229,31 +1230,31 @@ export default function AISettings({ user }: { user: User }) {
                       <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Provides backend capabilities for OpenAI GPT/o3 model suites.</p>
                     </div>
 
-                    {/* Groq */}
-                    <div className={`p-5 rounded-2xl border transition-all ${usesProvider('groq') ? 'border-[#7c1a1a] bg-red-50/15' : 'border-slate-100 bg-[#fafafa]'}`}>
+                    {/* Together AI */}
+                    <div className={`p-5 rounded-2xl border transition-all ${usesProvider('together') ? 'border-[#7c1a1a] bg-red-50/15' : 'border-slate-100 bg-[#fafafa]'}`}>
                       <div className="flex justify-between items-center mb-1.5">
-                        <label className="text-xs font-bold text-slate-700">Groq API Key</label>
-                        {usesProvider('groq') && (
+                        <label className="text-xs font-bold text-slate-700">Together AI API Key</label>
+                        {usesProvider('together') && (
                           <span className="text-[10px] bg-red-50 text-[#7c1a1a] px-2 py-0.5 rounded font-extrabold uppercase border border-red-100">Active</span>
                         )}
                       </div>
                       <div className="relative">
                         <input
-                          type={showGroqKey ? "text" : "password"}
-                          value={groqKey}
-                          onChange={(e) => setGroqKey(e.target.value)}
-                          placeholder={serverKeysConfig.groqAvailable ? ENV_KEY_PLACEHOLDER : "gsk-..."}
+                          type={showTogetherKey ? "text" : "password"}
+                          value={togetherKey}
+                          onChange={(e) => setTogetherKey(e.target.value)}
+                          placeholder={serverKeysConfig.togetherAvailable ? ENV_KEY_PLACEHOLDER : "Enter Together API key"}
                           className="w-full bg-white border border-slate-200 focus:border-[#7c1a1a] rounded-xl pl-4 pr-10 py-2.5 text-xs text-slate-800 focus:outline-none transition-all font-mono"
                         />
                         <button
                           type="button"
-                          onClick={() => setShowGroqKey(!showGroqKey)}
+                          onClick={() => setShowTogetherKey(!showTogetherKey)}
                           className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
                         >
-                          {showGroqKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                          {showTogetherKey ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                       </div>
-                      <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Pipes queries through LLAMA, Qwen, or Kimi styles.</p>
+                      <p className="text-[10px] text-slate-400 mt-1.5 font-medium">Pay-per-use open models (Llama, Qwen, DeepSeek) via Together AI.</p>
                     </div>
 
                     {/* Gemini */}
@@ -2072,7 +2073,7 @@ export default function AISettings({ user }: { user: User }) {
                           </select>
                           <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
                             {aiDefenseMode === 'Via API'
-                              ? 'VitalTrust calls the Inspect API for pass/fail, then sends LLM requests directly to OpenAI, Gemini, Groq, etc.'
+                              ? 'VitalTrust calls the Inspect API for pass/fail, then sends LLM requests directly to OpenAI, Gemini, Together AI, etc.'
                               : 'VitalTrust sends LLM requests to your tenant Defense Gateway URL. Policy enforcement is inline at Cisco (separate AI Defense application + policy).'}
                           </p>
                         </div>
@@ -2113,7 +2114,7 @@ export default function AISettings({ user }: { user: User }) {
 
                             <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
                               <p className="text-[11px] text-amber-900 font-semibold leading-relaxed">
-                                Defense Gateway mode routes LLM traffic through Cisco&apos;s inline proxy. <strong>AWS Bedrock</strong> is the primary path (SigV4-signed Converse). <strong>OpenAI</strong> and <strong>Groq</strong> also route via <code className="text-[10px] bg-amber-100 px-1 rounded">/v1/chat/completions</code> on the gateway URL. Use Via API inspect mode for Gemini.
+                                Defense Gateway mode routes LLM traffic through Cisco&apos;s inline proxy. <strong>AWS Bedrock</strong> is the primary path (SigV4-signed Converse). <strong>OpenAI</strong> and <strong>Together AI</strong> also route via <code className="text-[10px] bg-amber-100 px-1 rounded">/v1/chat/completions</code> on the gateway URL. Use Via API inspect mode for Gemini.
                               </p>
                             </div>
                           </>

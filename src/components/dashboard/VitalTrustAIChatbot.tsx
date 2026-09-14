@@ -5,6 +5,7 @@ import {
   DEFAULT_ASSISTANT_MODEL_LABEL,
   getModelFamily,
   migrateAssistantModelLabel,
+  readTogetherKeyFromClientStorage,
 } from '../../llm-models';
 import { User } from '../../types';
 import { applyInstanceSettingsToClientStorage } from '../../instance-settings-sync';
@@ -49,7 +50,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   // Load configuration from localStorage
   const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_ASSISTANT_MODEL_LABEL);
   const [openaiKey, setOpenaiKey] = useState<string>('');
-  const [groqKey, setGroqKey] = useState<string>('');
+  const [togetherKey, setTogetherKey] = useState<string>('');
   const [geminiKey, setGeminiKey] = useState<string>('');
   const [claudeKey, setClaudeKey] = useState<string>('');
   const [awsRegion, setAwsRegion] = useState<string>('us-east-1');
@@ -62,14 +63,14 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   const [serverKeysConfig, setServerKeysConfig] = useState<{
     geminiAvailable: boolean;
     openaiAvailable: boolean;
-    groqAvailable: boolean;
+    togetherAvailable: boolean;
     claudeAvailable: boolean;
     awsBedrockAvailable: boolean;
     activeProvider: string;
   }>({
     geminiAvailable: false,
     openaiAvailable: false,
-    groqAvailable: false,
+    togetherAvailable: false,
     claudeAvailable: false,
     awsBedrockAvailable: false,
     activeProvider: 'local'
@@ -90,7 +91,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
         localStorage.setItem('vt_ai_selected_model', migrated);
       }
       setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
-      setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
+      setTogetherKey(readTogetherKeyFromClientStorage());
       setGeminiKey(localStorage.getItem('vt_ai_gemini_key') || '');
       setClaudeKey(localStorage.getItem('vt_ai_claude_key') || '');
       setAwsRegion(localStorage.getItem('vt_ai_aws_region') || 'us-east-1');
@@ -115,7 +116,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
           setServerKeysConfig({
             geminiAvailable: !!data.geminiAvailable,
             openaiAvailable: !!data.openaiAvailable,
-            groqAvailable: !!data.groqAvailable,
+            togetherAvailable: !!data.togetherAvailable,
             claudeAvailable: !!data.claudeAvailable,
             awsBedrockAvailable: !!data.awsBedrockAvailable,
             activeProvider: data.activeProvider || 'local'
@@ -132,7 +133,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   useEffect(() => {
     const refreshClientSettings = () => {
       setOpenaiKey(localStorage.getItem('vt_ai_openai_key') || '');
-      setGroqKey(localStorage.getItem('vt_ai_groq_key') || '');
+      setTogetherKey(readTogetherKeyFromClientStorage());
       setGeminiKey(localStorage.getItem('vt_ai_gemini_key') || '');
       setClaudeKey(localStorage.getItem('vt_ai_claude_key') || '');
       setAwsRegion(localStorage.getItem('vt_ai_aws_region') || 'us-east-1');
@@ -201,8 +202,8 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
   let isConfigured = false;
   if (activeFamily === 'openai') {
     isConfigured = openaiKey.trim().length > 0 || serverKeysConfig.openaiAvailable;
-  } else if (activeFamily === 'groq') {
-    isConfigured = groqKey.trim().length > 0 || serverKeysConfig.groqAvailable;
+  } else if (activeFamily === 'together') {
+    isConfigured = togetherKey.trim().length > 0 || serverKeysConfig.togetherAvailable;
   } else if (activeFamily === 'gemini') {
     isConfigured = geminiKey.trim().length > 0 || serverKeysConfig.geminiAvailable;
   } else if (activeFamily === 'claude') {
@@ -238,7 +239,7 @@ export default function VitalTrustAIChatbot({ user }: { user: User; key?: string
           selectedModel: selectedModel,
           apiKeys: {
             openaiKey,
-            groqKey,
+            togetherKey,
             geminiKey,
             claudeKey,
             awsRegion,
