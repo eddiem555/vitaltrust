@@ -12,6 +12,8 @@ export type InstanceSettings = {
   selectedModel?: string;
   agentSelectedModel?: string;
   openaiKey?: string;
+  togetherKey?: string;
+  /** @deprecated Legacy Groq key — migrated to togetherKey */
   groqKey?: string;
   geminiKey?: string;
   claudeKey?: string;
@@ -78,7 +80,7 @@ export function saveInstanceSettings(input: Partial<InstanceSettings>): Instance
     selectedModel: mergeStringField(input.selectedModel, existing.selectedModel),
     agentSelectedModel: mergeStringField(input.agentSelectedModel, existing.agentSelectedModel),
     openaiKey: mergeStringField(input.openaiKey, existing.openaiKey),
-    groqKey: mergeStringField(input.groqKey, existing.groqKey),
+    togetherKey: mergeStringField(input.togetherKey ?? input.groqKey, existing.togetherKey ?? existing.groqKey),
     geminiKey: mergeStringField(input.geminiKey, existing.geminiKey),
     claudeKey: mergeStringField(input.claudeKey, existing.claudeKey),
     awsRegion: mergeStringField(input.awsRegion, existing.awsRegion),
@@ -130,7 +132,7 @@ function pickFirstNonEmpty(...values: Array<string | undefined>): string {
 /** Merge client payload with persisted instance settings and environment fallbacks. */
 export function resolveChatApiKeys(clientKeys: Record<string, string | undefined> | undefined): {
   openaiKey: string;
-  groqKey: string;
+  togetherKey: string;
   geminiKey: string;
   claudeKey: string;
   awsRegion: string;
@@ -141,7 +143,14 @@ export function resolveChatApiKeys(clientKeys: Record<string, string | undefined
   const stored = readFileSettings();
   return {
     openaiKey: pickFirstNonEmpty(clientKeys?.openaiKey, stored?.openaiKey, process.env.OPENAI_API_KEY),
-    groqKey: pickFirstNonEmpty(clientKeys?.groqKey, stored?.groqKey, process.env.GROQ_API_KEY),
+    togetherKey: pickFirstNonEmpty(
+      clientKeys?.togetherKey,
+      clientKeys?.groqKey,
+      stored?.togetherKey,
+      stored?.groqKey,
+      process.env.TOGETHER_API_KEY,
+      process.env.GROQ_API_KEY
+    ),
     geminiKey: pickFirstNonEmpty(clientKeys?.geminiKey, stored?.geminiKey, process.env.GEMINI_API_KEY),
     claudeKey: pickFirstNonEmpty(clientKeys?.claudeKey, stored?.claudeKey, process.env.CLAUDE_API_KEY),
     awsRegion: pickFirstNonEmpty(clientKeys?.awsRegion, stored?.awsRegion, process.env.AWS_REGION, "us-east-1"),

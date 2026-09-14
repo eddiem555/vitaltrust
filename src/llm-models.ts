@@ -24,15 +24,16 @@ export const OPENAI_LLM_MODELS: LlmModelOption[] = [
 ];
 
 /**
- * Together AI chat models (OpenAI-compatible, pay-per-use).
- * @see https://docs.together.ai/docs/chat-overview
+ * Together AI serverless chat models (OpenAI-compatible, pay-per-use).
+ * Only models from the serverless catalog — dedicated-endpoint models will 400.
+ * @see https://docs.together.ai/docs/inference-models
  */
 export const TOGETHER_LLM_MODELS: LlmModelOption[] = [
-  { family: "together", label: "Together - Llama 3.1 8B Turbo", apiId: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo" },
+  { family: "together", label: "Together - Qwen3.5 9B", apiId: "Qwen/Qwen3.5-9B" },
+  { family: "together", label: "Together - GLM 5.3 Flash", apiId: "zai-org/GLM-5.3-Flash" },
+  { family: "together", label: "Together - GPT OSS 20B", apiId: "openai/gpt-oss-20b" },
+  { family: "together", label: "Together - DeepSeek V4 Flash", apiId: "deepseek-ai/DeepSeek-V4-Flash-0731" },
   { family: "together", label: "Together - Llama 3.3 70B Turbo", apiId: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
-  { family: "together", label: "Together - Qwen 2.5 7B Turbo", apiId: "Qwen/Qwen2.5-7B-Instruct-Turbo" },
-  { family: "together", label: "Together - Qwen 2.5 72B Turbo", apiId: "Qwen/Qwen2.5-72B-Instruct-Turbo" },
-  { family: "together", label: "Together - DeepSeek R1 Distill 70B", apiId: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B" },
 ];
 
 /**
@@ -77,18 +78,22 @@ const LEGACY_ASSISTANT_LABEL_MAP: Record<string, string> = {
   "openai gpt-4o": "OpenAI - GPT-4o",
   "openai gpt-4": "OpenAI - GPT-4.1 mini",
   "openai - o3-mini": "OpenAI - o4-mini",
-  "groq - gpt oss 20b": "Together - Llama 3.1 8B Turbo",
+  "together - llama 3.1 8b turbo": "Together - Qwen3.5 9B",
+  "together - qwen 2.5 7b turbo": "Together - Qwen3.5 9B",
+  "together - qwen 2.5 72b turbo": "Together - Llama 3.3 70B Turbo",
+  "together - deepseek r1 distill 70b": "Together - DeepSeek V4 Flash",
+  "groq - gpt oss 20b": "Together - GPT OSS 20B",
   "groq - gpt oss 120b": "Together - Llama 3.3 70B Turbo",
-  "groq - qwen3.6 27b": "Together - Qwen 2.5 7B Turbo",
-  "groq - qwen3.8 27b": "Together - Qwen 2.5 72B Turbo",
-  "groq - gpt oss safeguard 20b": "Together - Llama 3.1 8B Turbo",
-  "groq - llama 3.1 8b instant": "Together - Llama 3.1 8B Turbo",
+  "groq - qwen3.6 27b": "Together - Qwen3.5 9B",
+  "groq - qwen3.8 27b": "Together - Llama 3.3 70B Turbo",
+  "groq - gpt oss safeguard 20b": "Together - GPT OSS 20B",
+  "groq - llama 3.1 8b instant": "Together - Qwen3.5 9B",
   "groq - llama 3.3 70b versatile": "Together - Llama 3.3 70B Turbo",
-  "groq - gemma2 9b": "Together - Llama 3.1 8B Turbo",
+  "groq - gemma2 9b": "Together - Qwen3.5 9B",
   "groq - llama 3.1 70b versatile": "Together - Llama 3.3 70B Turbo",
-  "groq - qwen3 32b": "Together - Qwen 2.5 7B Turbo",
+  "groq - qwen3 32b": "Together - Qwen3.5 9B",
   "groq - llama 4 maverick 17b": "Together - Llama 3.3 70B Turbo",
-  "groq - kimi k2 instruct": "Together - Qwen 2.5 72B Turbo",
+  "groq - kimi k2 instruct": "Together - DeepSeek V4 Flash",
   "gemini-2.5-flash": "Gemini - 3.5 Flash",
   "gemini-2.5-flash-lite": "Gemini - 3.5 Flash Lite",
   "gemini-2.5-pro": "Gemini - 3.6 Flash",
@@ -209,26 +214,34 @@ export function resolveTogetherModelId(modelName: string): string {
   if (fromLabel) return fromLabel;
 
   const legacyTogetherApiIds: Record<string, string> = {
-    "openai/gpt-oss-20b": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+    "meta-llama/meta-llama-3.1-8b-instruct-turbo": "Qwen/Qwen3.5-9B",
+    "qwen/qwen2.5-7b-instruct-turbo": "Qwen/Qwen3.5-9B",
+    "qwen/qwen2.5-72b-instruct-turbo": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "deepseek-ai/deepseek-r1-distill-llama-70b": "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "openai/gpt-oss-20b": "openai/gpt-oss-20b",
     "openai/gpt-oss-120b": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    "qwen/qwen3.6-27b": "Qwen/Qwen2.5-7B-Instruct-Turbo",
-    "qwen/qwen3.8-27b": "Qwen/Qwen2.5-72B-Instruct-Turbo",
+    "qwen/qwen3.6-27b": "Qwen/Qwen3.5-9B",
+    "qwen/qwen3.8-27b": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
     "groq-llama-3.3-70b-versatile": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    "groq-qwen3-32b": "Qwen/Qwen2.5-7B-Instruct-Turbo",
+    "groq-qwen3-32b": "Qwen/Qwen3.5-9B",
   };
   if (legacyTogetherApiIds[key]) return legacyTogetherApiIds[key];
 
   if (key.startsWith("together -") || key.startsWith("groq -")) {
     const match = TOGETHER_LLM_MODELS.find((m) => m.label.toLowerCase() === key);
     if (match) return match.apiId;
-    if (key.includes("qwen") && key.includes("72")) return "Qwen/Qwen2.5-72B-Instruct-Turbo";
-    if (key.includes("qwen")) return "Qwen/Qwen2.5-7B-Instruct-Turbo";
-    if (key.includes("deepseek") || key.includes("r1")) return "deepseek-ai/DeepSeek-R1-Distill-Llama-70B";
-    if (key.includes("70b") || key.includes("120b")) return "meta-llama/Llama-3.3-70B-Instruct-Turbo";
-    return "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo";
+    if (key.includes("glm")) return "zai-org/GLM-5.3-Flash";
+    if (key.includes("qwen3.5") || key.includes("qwen 3.5")) return "Qwen/Qwen3.5-9B";
+    if (key.includes("qwen")) return "Qwen/Qwen3.5-9B";
+    if (key.includes("deepseek") || key.includes("v4")) return "deepseek-ai/DeepSeek-V4-Flash-0731";
+    if (key.includes("oss") && key.includes("20")) return "openai/gpt-oss-20b";
+    if (key.includes("70b") || key.includes("120b") || key.includes("llama 3.3")) {
+      return "meta-llama/Llama-3.3-70B-Instruct-Turbo";
+    }
+    return "Qwen/Qwen3.5-9B";
   }
   if (key.startsWith("groq-")) return resolveTogetherModelId(`groq - ${key.slice(5)}`);
-  return "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo";
+  return "Qwen/Qwen3.5-9B";
 }
 
 export function resolveGeminiModelId(modelName: string): string {
