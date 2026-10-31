@@ -210,6 +210,8 @@ export default function AISettings({ user }: { user: User }) {
   // Security Controls Tab States
   const [aiDefenseGateway, setAiDefenseGateway] = useState<string>(DEFAULT_AI_DEFENSE_INSPECT_SERVER);
   const [aiDefenseEnabled, setAiDefenseEnabled] = useState<boolean>(false);
+  /** Last persisted guardrail toggle value — drives the unsaved-changes hint. */
+  const [savedAiDefenseEnabled, setSavedAiDefenseEnabled] = useState<boolean>(false);
   const [aiDefenseMode, setAiDefenseMode] = useState<AiDefenseIntegrationMode>('Via API');
   const [aiDefenseServer, setAiDefenseServer] = useState<string>(DEFAULT_AI_DEFENSE_INSPECT_SERVER);
   const [aiDefenseProxyUrl, setAiDefenseProxyUrl] = useState<string>('');
@@ -314,7 +316,9 @@ export default function AISettings({ user }: { user: User }) {
     setAgentNightShiftOnly(localStorage.getItem('vt_agent_night_shift_only') !== 'false');
 
     // Security Gateways
-    setAiDefenseEnabled(localStorage.getItem('vt_ai_defense_enabled') === 'true');
+    const savedDefenseEnabled = localStorage.getItem('vt_ai_defense_enabled') === 'true';
+    setAiDefenseEnabled(savedDefenseEnabled);
+    setSavedAiDefenseEnabled(savedDefenseEnabled);
     const savedMode = localStorage.getItem('vt_ai_defense_mode') || 'Via API';
     setAiDefenseMode(savedMode === 'Defense Gateway' ? 'Defense Gateway' : 'Via API');
     const savedServer = localStorage.getItem('vt_ai_defense_server') || DEFAULT_AI_DEFENSE_INSPECT_SERVER;
@@ -569,7 +573,8 @@ export default function AISettings({ user }: { user: User }) {
     if (!canConfigureSettings) return;
 
     let normalizedProxy = aiDefenseProxyUrl;
-    if (aiDefenseMode === 'Defense Gateway') {
+    // Gateway URL is only required while guardrails are enabled; disabling must always be saveable.
+    if (aiDefenseEnabled && aiDefenseMode === 'Defense Gateway') {
       normalizedProxy = normalizeDefenseProxyUrl(aiDefenseProxyUrl);
       if (!normalizedProxy) {
         setDefenseTestStatus('error');
@@ -592,6 +597,7 @@ export default function AISettings({ user }: { user: User }) {
     }
 
     localStorage.setItem('vt_ai_defense_enabled', String(aiDefenseEnabled));
+    setSavedAiDefenseEnabled(aiDefenseEnabled);
     localStorage.setItem('vt_ai_defense_mode', aiDefenseMode);
     localStorage.setItem('vt_ai_defense_server', aiDefenseServer);
     localStorage.setItem('vt_ai_defense_api_key', aiDefenseApiKey);
@@ -613,9 +619,11 @@ export default function AISettings({ user }: { user: User }) {
     
     setDefenseTestStatus('success');
     setDefenseTestMessage(
-      aiDefenseMode === 'Defense Gateway'
-        ? 'Success: Defense Gateway settings saved. LLM traffic will route through your tenant proxy URL on the next chat request (Bedrock-first).'
-        : 'Success: Cisco AI Defense settings saved successfully!'
+      !aiDefenseEnabled
+        ? 'Success: Cisco AI Defense guardrails disabled. LLM traffic now goes directly to the provider.'
+        : aiDefenseMode === 'Defense Gateway'
+          ? 'Success: Defense Gateway settings saved. LLM traffic will route through your tenant proxy URL on the next chat request (Bedrock-first).'
+          : 'Success: Cisco AI Defense settings saved successfully!'
     );
     
     setSaveSuccess(true);
@@ -2001,6 +2009,7 @@ export default function AISettings({ user }: { user: User }) {
               </div>
 
               <div className="p-8 space-y-6">
+                <form onSubmit={handleSaveSecuritySettings} className="space-y-6">
                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex flex-col sm:flex-row items-start justify-between gap-4">
                   <div className="flex items-start gap-3.5">
                     <div className="w-10 h-10 bg-[#7c1a1a]/5 rounded-xl flex items-center justify-center text-[#7c1a1a] border border-[#7c1a1a]/20 shrink-0">
@@ -2023,11 +2032,10 @@ export default function AISettings({ user }: { user: User }) {
                       disabled={!canConfigureSettings}
                       onClick={() => {
                         if (!canConfigureSettings) return;
-                        const nextVal = !aiDefenseEnabled;
-                        setAiDefenseEnabled(nextVal);
-                        localStorage.setItem('vt_ai_defense_enabled', String(nextVal));
-                        void persistInstanceSettings({ aiDefenseEnabled: nextVal });
-                        window.dispatchEvent(new Event('vt_settings_updated'));
+                        // Draft only — committed by "Save AI Defense Settings" for both enable and disable.
+                        setAiDefenseEnabled(!aiDefenseEnabled);
+                        setDefenseTestStatus('idle');
+                        setDefenseTestMessage('');
                       }}
                       className={`w-11 h-6 flex items-center rounded-full p-1 transition-all duration-300 focus:outline-none ${
                         aiDefenseEnabled ? 'bg-emerald-500 justify-end' : 'bg-slate-300 justify-start'
@@ -2044,7 +2052,7 @@ export default function AISettings({ user }: { user: User }) {
                 </div>
 
                 {aiDefenseEnabled && (
-                  <form onSubmit={handleSaveSecuritySettings} className="space-y-6">
+                  <>
                     <div className="border-t border-slate-100 pt-6">
                       <h5 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
                         <span className="w-1.5 h-3 bg-[#7c1a1a] rounded" />
@@ -2291,49 +2299,58 @@ export default function AISettings({ user }: { user: User }) {
                         </p>
                       </div>
                     )}
-
-                    <div className="flex flex-col gap-3 pt-4 border-t border-slate-100">
-                      {defenseTestMessage && (
-                        <div className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center gap-2.5 transition-all ${
-                          defenseTestStatus === 'testing' ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse' :
-                          defenseTestStatus === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                          'bg-rose-50 text-rose-700 border-rose-100'
-                        }`}>
-                          {defenseTestStatus === 'testing' && <Loader2 className="animate-spin w-4 h-4 shrink-0" />}
-                          {defenseTestStatus === 'success' && <Shield className="w-4 h-4 shrink-0 text-emerald-600" />}
-                          {defenseTestStatus === 'error' && <Shield className="w-4 h-4 shrink-0 text-rose-600" />}
-                          <span>{defenseTestMessage}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-end gap-3.5">
-                        <button
-                          type="button"
-                          disabled={defenseTestStatus === 'testing'}
-                          onClick={handleTestSecurityConnection}
-                          className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 border transition-all shadow-md active:translate-y-px cursor-pointer ${
-                            defenseTestStatus === 'testing' ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed shadow-none' :
-                            'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300'
-                          }`}
-                        >
-                          <Shield size={14} className={defenseTestStatus === 'testing' ? 'animate-pulse text-amber-500' : 'text-slate-500'} />
-                          {defenseTestStatus === 'testing' ? 'Testing...' : aiDefenseMode === 'Defense Gateway' ? 'Validate Gateway URL' : 'Test Connection'}
-                        </button>
-
-                        <button
-                          type="submit"
-                          disabled={defenseTestStatus === 'testing'}
-                          className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-md active:translate-y-px cursor-pointer ${
-                            defenseTestStatus === 'testing' ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed shadow-none' :
-                            'bg-[#7c1a1a] text-white hover:bg-red-800 border border-[#7c1a1a] shadow-red-950/20'
-                          }`}
-                        >
-                          <Save size={14} />
-                          Save AI Defense Settings
-                        </button>
-                      </div>
-                    </div>
-                  </form>
+                  </>
                 )}
+
+                <div className="flex flex-col gap-3 pt-4 border-t border-slate-100">
+                  {defenseTestMessage && (
+                    <div className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center gap-2.5 transition-all ${
+                      defenseTestStatus === 'testing' ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse' :
+                      defenseTestStatus === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                      'bg-rose-50 text-rose-700 border-rose-100'
+                    }`}>
+                      {defenseTestStatus === 'testing' && <Loader2 className="animate-spin w-4 h-4 shrink-0" />}
+                      {defenseTestStatus === 'success' && <Shield className="w-4 h-4 shrink-0 text-emerald-600" />}
+                      {defenseTestStatus === 'error' && <Shield className="w-4 h-4 shrink-0 text-rose-600" />}
+                      <span>{defenseTestMessage}</span>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap justify-end items-center gap-3.5">
+                    {aiDefenseEnabled !== savedAiDefenseEnabled && (
+                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 mr-auto">
+                        Unsaved change: guardrails will be {aiDefenseEnabled ? 'enabled' : 'disabled'} on save
+                      </span>
+                    )}
+
+                    {aiDefenseEnabled && (
+                      <button
+                        type="button"
+                        disabled={defenseTestStatus === 'testing'}
+                        onClick={handleTestSecurityConnection}
+                        className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 border transition-all shadow-md active:translate-y-px cursor-pointer ${
+                          defenseTestStatus === 'testing' ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed shadow-none' :
+                          'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300'
+                        }`}
+                      >
+                        <Shield size={14} className={defenseTestStatus === 'testing' ? 'animate-pulse text-amber-500' : 'text-slate-500'} />
+                        {defenseTestStatus === 'testing' ? 'Testing...' : aiDefenseMode === 'Defense Gateway' ? 'Validate Gateway URL' : 'Test Connection'}
+                      </button>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={defenseTestStatus === 'testing' || !canConfigureSettings}
+                      className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-md active:translate-y-px cursor-pointer ${
+                        defenseTestStatus === 'testing' || !canConfigureSettings ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed shadow-none' :
+                        'bg-[#7c1a1a] text-white hover:bg-red-800 border border-[#7c1a1a] shadow-red-950/20'
+                      }`}
+                    >
+                      <Save size={14} />
+                      Save AI Defense Settings
+                    </button>
+                  </div>
+                </div>
+                </form>
               </div>
             </div>
 

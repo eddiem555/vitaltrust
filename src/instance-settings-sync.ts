@@ -13,7 +13,7 @@ export function applyInstanceSettingsToClientStorage(settings: Partial<InstanceS
   setIfDefined("vt_ai_selected_model", settings.selectedModel);
   setIfDefined("vt_ai_agent_selected_model", settings.agentSelectedModel);
   setIfDefined("vt_ai_openai_key", settings.openaiKey);
-  setIfDefined("vt_ai_groq_key", settings.groqKey);
+  setIfDefined("vt_ai_together_key", settings.togetherKey ?? settings.groqKey);
   setIfDefined("vt_ai_gemini_key", settings.geminiKey);
   setIfDefined("vt_ai_claude_key", settings.claudeKey);
   setIfDefined("vt_ai_aws_region", settings.awsRegion);

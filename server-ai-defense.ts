@@ -5,13 +5,13 @@
  *
  * **API Mode (Out-of-Band)** — application enforces guardrails.
  *   - Call the Inspect API (/api/v1/inspect/chat) for Pass/Fail verdicts.
- *   - LLM traffic goes DIRECTLY to the provider (OpenAI, Google, Groq, etc.).
+ *   - LLM traffic goes DIRECTLY to the provider (OpenAI, Google, Together AI, etc.).
  *   - VitalTrust applies enforcement in application code (block before/after LLM).
  *
  * **Defense Gateway Mode (In-Line Proxy)** — Cisco terminates and proxies LLM traffic.
  *   - Route LLM requests to the tenant Defense Gateway connection URL from the portal.
  *   - Bedrock: SigV4-signed POST to `{gatewayUrl}/model/{modelId}/converse`
- *   - OpenAI / Groq: `{gatewayUrl}/v1/chat/completions` with provider API key
+ *   - OpenAI / Together AI: `{gatewayUrl}/v1/chat/completions` with provider API key
  *   - Policy is enforced inline at Cisco (no Inspect pre-scan; no app rules matrix).
  *
  * Regional inspect hosts (*.api.inspect.aidefense.security.cisco.com) are API-mode

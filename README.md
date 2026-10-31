@@ -38,7 +38,7 @@ Typical lab goals:
 
 - In-app chatbot with **Model Context Protocol (MCP) function calling**
 - Server-side tools filter data by logged-in user and role (e.g. `get_my_assigned_patients`, `get_user_directory`)
-- Supports OpenAI, Groq, Gemini, Claude, and AWS Bedrock
+- Supports OpenAI, Together AI, Gemini, Claude, and AWS Bedrock
 - Optional background agents (chart updater, overnight nurse)
 
 ### Security integration hooks
@@ -197,7 +197,7 @@ cp .env.example .env
 |----------|----------------|---------|
 | `DEFAULT_PASSWORD_SHA256` | First-login bootstrap | Pre-set admin password (SHA-256 hex) |
 | `DUO_ISSUER_URL`, `DUO_CLIENT_ID`, `DUO_CLIENT_SECRET` | Settings → Duo SSO | Cisco Duo OIDC |
-| `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `CLAUDE_API_KEY` | Settings → AI Settings | LLM providers |
+| `OPENAI_API_KEY`, `GEMINI_API_KEY`, `TOGETHER_API_KEY`, `CLAUDE_API_KEY` | Settings → AI Settings | LLM providers |
 | `AWS_REGION`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY` | Settings → AI Settings | AWS Bedrock |
 | `CISCO_AI_DEFENSE_API_KEY` | Settings → Security Controls | AI Defense Inspect API |
 | `MCP_ENABLED` | — | Set `false` to disable `/mcp` |
