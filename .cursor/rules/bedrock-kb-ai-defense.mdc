@@ -1,0 +1,34 @@
+---
+description: AWS Bedrock Knowledge Base used for Cisco AI Defense inventory (VitalTrust lab)
+alwaysApply: true
+---
+
+# VitalTrust Bedrock Knowledge Base (AI Defense inventory)
+
+This is **not** part of the Node/React app. It lives in AWS account `772180452080`, region `us-east-1`, and was first created in the Bedrock console so Cisco AI Defense **AI Assets → Knowledge bases** has a real AWS resource.
+
+## Existing lab resources (do not recreate if they already exist)
+
+| Resource | Name / URI |
+|---|---|
+| Knowledge base | `vitaltrust-ehr-kb` |
+| S3 data bucket | `s3://vitaltrust-kb-data-772180452080/` |
+| Seed object | `vitaltrust-clinical-protocols.txt` (canonical copy: `docs/seed/vitaltrust-clinical-protocols.txt`) |
+| Data source (console) | `vitaltrust-s3-source` |
+| Embeddings (intended) | Amazon Titan Text Embeddings V2 (or Titan Embeddings G1 - Text) |
+| Vector store | OpenSearch Serverless via Bedrock **Quick create a new vector store** |
+| IAM | Bedrock-managed KB service role from console create |
+
+## How it shows up in Cisco AI Defense
+
+- **Knowledge bases** tab: `vitaltrust-ehr-kb` (source AWS, often “Assets from Unassigned Cloud…”).
+- **Models** tab: Bedrock **InvokeModel** / CloudTrail (e.g. Nova 2 Lite). A KB does not by itself list every serverless FM.
+- AgentCore Harnesses, GitHub `SKILL.md`, and MCP configs are **not** this KB. Those belong to the separate **Aether Corp** lab (`~/src/ai-inventory-lab`), not VitalTrust.
+
+## Repo artifacts
+
+- Procedure: `docs/bedrock-knowledge-base.md`
+- Seed: `docs/seed/vitaltrust-clinical-protocols.txt` (lab/synthetic only; includes a fake DLP test record)
+- Recreate S3 + upload: `deployment/bedrock-kb/`
+
+Do not attach `vitaltrust-ehr-kb` to the Aether HR AgentCore harness. Clinical/PHI-shaped lab content stays on the EHR KB; HR policy RAG is a separate Aether KB.

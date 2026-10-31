@@ -275,8 +275,8 @@ vitaltrust/
 ├── server.ts               # Express server, auth, AI chat, routing
 ├── server-mcp-tools.ts     # MCP tool implementations
 ├── server-ai-defense.ts    # Cisco AI Defense helpers
-├── deployment/             # Dockerfile, deploy scripts, vt-* helpers
-├── docs/                   # Architecture diagrams, MCP parity notes
+├── deployment/             # Dockerfile, deploy scripts, vt-* helpers, Bedrock KB S3 helper
+├── docs/                   # Architecture diagrams, MCP parity notes, Bedrock KB
 └── duo-sso-config.ts       # Server-side Duo credential persistence
 ```
 
@@ -309,6 +309,7 @@ vitaltrust/
 - [`AGENTS.md`](AGENTS.md) — Project conventions for contributors and AI assistants
 - [`deployment/README.md`](deployment/README.md) — Docker and distributed deployment
 - [`docs/MCP-UI-PARITY.md`](docs/MCP-UI-PARITY.md) — MCP tool vs UI feature matrix
+- [`docs/bedrock-knowledge-base.md`](docs/bedrock-knowledge-base.md) — AWS Bedrock KB (`vitaltrust-ehr-kb`) for Cisco AI Defense inventory (not used by the in-app assistant)
 - [`.env.example`](.env.example) — Optional environment variables
 
 ---

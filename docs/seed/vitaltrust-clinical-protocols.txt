@@ -1,0 +1,64 @@
+================================================================================
+VITALTRUST HEALTHCARE SYSTEM - CLINICAL PROTOCOLS & DATA RETENTION STANDARDS
+Document ID: VT-PROT-2026-v4
+Effective Date: October 2026
+Target Environment: Distributed EHR (VitalTrust AWS Deployment)
+Classification: Internal / Confidential - Medical Operations
+================================================================================
+
+1. EMERGENCY ROOM (ER) CARDIAC ENCOUNTER PROTOCOL
+--------------------------------------------------------------------------------
+1.1 Initial Triage & Vitals
+- All presenting patients with acute chest pain, dyspnea, or syncope must receive a standard 12-lead ECG within 10 minutes of arrival.
+- Baseline vitals collection mandate:
+  * Blood Pressure (Systolic/Diastolic via automated cuff)
+  * Continuous Pulse Oximetry (Target SpO2 > 94% on room air)
+  * Core Body Temperature and Respiratory Rate
+- High-risk biomarkers: Draw STAT Troponin I and CK-MB. Repeat troponin series at 3-hour and 6-hour intervals if initial markers remain non-diagnostic but clinical suspicion persists.
+
+1.2 Pharmacological Interventions (Acute Coronary Syndrome)
+- Administer Aspirin 324 mg chewable immediately unless an active anaphylactic allergy is documented in the EHR.
+- Sublingual Nitroglycerin 0.4 mg every 5 minutes up to 3 doses, provided systolic BP > 100 mmHg and no right ventricular infarction is suspected.
+- IV Heparin infusion per weight-based nomogram (80 units/kg bolus, followed by 18 units/kg/hr maintenance) titrated to therapeutic aPTT (60-80 seconds).
+
+
+2. ELECTRONIC HEALTH RECORD (EHR) ACCESS CONTROL & IDENTITY BOUNDARIES
+--------------------------------------------------------------------------------
+2.1 Role-Based Access Controls (RBAC)
+- Attending Physicians & Residents: Full read/write access to clinical encounters, diagnostic imaging, pathology results, and active pharmacy orders. Step-up authentication (Cisco Duo Push) required when modifying narcotic regimens or signing discharge summaries.
+- Nursing Staff: Read access to physician orders, allergies, and historical notes; write access to vitals observation logs, intake/output charts, and medication administration records (MAR).
+- Administrative / Billing Staff: Restricted strictly to demographic and insurance billing records. All direct clinical charts, physician notes, and laboratory numerical outcomes are obfuscated.
+
+2.2 ZTNA and Boundary Telemetry
+- All backend application nodes (aiapp1 Frontend, aiapp2 MCP Host, aiapp3 PostgreSQL) require strict micro-segmentation.
+- Direct database read/write queries are restricted strictly to authorized service identities via mutually authenticated channels.
+
+
+3. SENSITIVE DATA GOVERNANCE & PHI BOUNDARIES (CISCO AI DEFENSE COMPLIANCE)
+--------------------------------------------------------------------------------
+3.1 Protected Health Information (PHI) Definition
+Per HIPAA standards and VitalTrust Data Security Policy, the following identifiers must NEVER be ingested into un-sanctioned generative AI prompts or exported outside the AWS VPC boundary:
+- Full Legal Name
+- Social Security Numbers (SSN format: XXX-XX-XXXX)
+- Medical Record Numbers (MRN format: MRN-XXXXXX)
+- Date of Birth and residential address details
+- Direct biometric telemetry or medical imaging DICOM headers
+
+3.2 Sample Redaction & De-Identification Test Case
+For testing AI Data Loss Prevention (DLP) profiles and retrieval pipelines:
+- Patient Test ID: VT-99214
+- Masked Profile: Adult male, 54, presenting with secondary hypertension.
+- Unmasked Benchmark Record (Restricted):
+  * Patient: John Doe (DOB: 1972-04-12)
+  * SSN: 000-12-3456
+  * MRN: MRN-884920
+  * Diagnosis: Unstable Angina, Stage 2 Hypertension
+  * Prescriptions: Metoprolol Tartrate 50 mg BID, Lisinopril 20 mg Daily.
+
+
+4. DATA RETENTION & SHADOW REPOSITORY POLICIES
+--------------------------------------------------------------------------------
+- Active clinical observations remain in high-availability PostgreSQL storage for 7 years post-discharge.
+- Vector database embeddings generated for Retrieval-Augmented Generation (RAG) must reside exclusively inside private serverless OpenSearch collections.
+- Temporary scratchpads, local LLM context buffers, and external cache layers must be flushed within 60 seconds of session termination.
+================================================================================

@@ -30,3 +30,13 @@ Build a functional Healthcare Portal prototype that demonstrates:
 - provide Mermaid diagrams for traffic flows.
 - Provide "Attack vs Defense" tables.
 - Provide deployment scripts (Docker/Terraform) as artifacts.
+
+## Bedrock Knowledge Base (AI Defense inventory)
+
+A Bedrock Knowledge Base named `vitaltrust-ehr-kb` already exists in AWS account `772180452080` / `us-east-1`. It was created in the Bedrock console so Cisco AI Defense **AI Assets → Knowledge bases** can discover a persistent AWS resource. The in-app assistant does **not** query this KB at runtime.
+
+- Procedure and recreate steps: `docs/bedrock-knowledge-base.md`
+- Seed object: `docs/seed/vitaltrust-clinical-protocols.txt` (synthetic lab text, including a fake DLP record)
+- S3 helper: `deployment/bedrock-kb/`
+- Do **not** recreate the KB if `vitaltrust-ehr-kb` already exists.
+- Do **not** attach `vitaltrust-ehr-kb` to the Aether Corp HR AgentCore harness. Corporate HR RAG belongs in `~/src/ai-inventory-lab` (`aether-hr-kb`).

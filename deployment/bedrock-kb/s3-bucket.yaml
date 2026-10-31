@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  S3 data bucket for the VitalTrust Bedrock Knowledge Base seed objects.
+  Does not create the Knowledge Base or OpenSearch collection (console quick-create).
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: vitaltrust-kb-data-772180452080
+    Description: Globally unique S3 bucket name. Change this if the default already exists.
+
+Resources:
+  KnowledgeBaseBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: vitaltrust
+        - Key: Purpose
+          Value: cisco-ai-defense-kb-inventory
+
+Outputs:
+  BucketName:
+    Value: !Ref KnowledgeBaseBucket
+  BucketArn:
+    Value: !GetAtt KnowledgeBaseBucket.Arn
+  SeedUri:
+    Value: !Sub "s3://${KnowledgeBaseBucket}/vitaltrust-clinical-protocols.txt"
